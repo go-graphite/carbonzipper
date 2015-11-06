@@ -27,9 +27,22 @@ import (
 	"github.com/peterbourgon/g2g"
 )
 
+type serverType int
+
+const (
+	serverBackend serverType = iota
+	serverResolver
+)
+
+type serverTarget struct {
+	server string
+	stype  serverType
+}
+
 // configuration values
 var Config = struct {
 	Backends    []string
+	Resolvers   []string
 	MaxProcs    int
 	IntervalSec int
 	Port        int
@@ -41,6 +54,7 @@ var Config = struct {
 	GraphiteHost string
 
 	pathCache pathCache
+	servers   []serverTarget
 
 	MaxIdleConnsPerHost int
 
@@ -675,6 +689,16 @@ func main() {
 
 	if len(Config.Backends) == 0 {
 		log.Fatal("no Backends loaded -- exiting")
+	}
+
+	// convenience array of everything
+	for server := range Config.Backends {
+		config.servers =
+			append(config.servers, serverTarget{server, serverBackend})
+	}
+	for server := range Config.Resolvers {
+		config.servers =
+			append(config.servers, serverTarget{server, serverResolver})
 	}
 
 	// command line overrides config file
