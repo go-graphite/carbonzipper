@@ -46,3 +46,9 @@ message ServerInfoResponse {
 message ZipperInfoResponse {
 	repeated ServerInfoResponse responses = 1;
 }
+
+message ResolveResponse {
+	required string prefix = 1;
+	required string suffix = 2;
+	repeated string replacements = 3;
+}
