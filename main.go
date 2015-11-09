@@ -692,13 +692,13 @@ func main() {
 	}
 
 	// convenience array of everything
-	for server := range Config.Backends {
-		config.servers =
-			append(config.servers, serverTarget{server, serverBackend})
+	for _, server := range Config.Backends {
+		Config.servers =
+			append(Config.servers, serverTarget{server, serverBackend})
 	}
-	for server := range Config.Resolvers {
-		config.servers =
-			append(config.servers, serverTarget{server, serverResolver})
+	for _, server := range Config.Resolvers {
+		Config.servers =
+			append(Config.servers, serverTarget{server, serverResolver})
 	}
 
 	// command line overrides config file
