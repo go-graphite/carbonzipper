@@ -108,7 +108,7 @@ var Limiter serverLimiter
 var logger mlog.Level
 
 type serverResponse struct {
-	server   string
+	server   serverTarget
 	response []byte
 }
 
@@ -121,7 +121,7 @@ var probeForce = make(chan int)
 func doProbe() {
 	query := "/metrics/find/?format=protobuf&query=%2A"
 
-	responses := multiGet(Config.Backends, query)
+	responses := multiGet(Config.servers, query)
 
 	if responses == nil || len(responses) == 0 {
 		return
@@ -150,11 +150,11 @@ func probeTlds() {
 	}
 }
 
-func singleGet(uri, server string, ch chan<- serverResponse, started chan<- struct{}) {
+func singleGet(uri string, server serverTarget, ch chan<- serverResponse, started chan<- struct{}) {
 
-	u, err := url.Parse(server + uri)
+	u, err := url.Parse(server.server + uri)
 	if err != nil {
-		logger.Logln("error parsing uri: ", server+uri, ":", err)
+		logger.Logln("error parsing uri: ", server.server+uri, ":", err)
 		ch <- serverResponse{server, nil}
 		return
 	}
@@ -168,7 +168,7 @@ func singleGet(uri, server string, ch chan<- serverResponse, started chan<- stru
 	defer Limiter.leave(server)
 	resp, err := storageClient.Do(&req)
 	if err != nil {
-		logger.Logln("singleGet: error querying ", server, "/", uri, ":", err)
+		logger.Logln("singleGet: error querying ", server.server, "/", uri, ":", err)
 		ch <- serverResponse{server, nil}
 		return
 	}
@@ -197,7 +197,7 @@ func singleGet(uri, server string, ch chan<- serverResponse, started chan<- stru
 	ch <- serverResponse{server, body}
 }
 
-func multiGet(servers []string, uri string) []serverResponse {
+func multiGet(servers []serverTarget, uri string) []serverResponse {
 
 	logger.Debugln("querying servers=", servers, "uri=", uri)
 
@@ -238,7 +238,7 @@ GATHER:
 		case <-timeout:
 			var servs []string
 			for _, r := range response {
-				servs = append(servs, r.server)
+				servs = append(servs, r.server.server)
 			}
 			// TODO(dgryski): log which servers have/haven't started
 			logger.Logln("Timeout waiting for more responses.  uri=", uri, ", servers=", servers, ", answers_from_servers=", servs)
@@ -255,10 +255,10 @@ type nameleaf struct {
 	leaf bool
 }
 
-func findHandlerPB(w http.ResponseWriter, req *http.Request, responses []serverResponse) ([]*pb.GlobMatch, map[string][]string) {
+func findHandlerPB(w http.ResponseWriter, req *http.Request, responses []serverResponse) ([]*pb.GlobMatch, map[string][]serverTarget) {
 
 	// metric -> [server1, ... ]
-	paths := make(map[string][]string)
+	paths := make(map[string][]serverTarget)
 	seen := make(map[nameleaf]bool)
 
 	var metrics []*pb.GlobMatch
@@ -266,7 +266,7 @@ func findHandlerPB(w http.ResponseWriter, req *http.Request, responses []serverR
 		var metric pb.GlobResponse
 		err := metric.Unmarshal(r.response)
 		if err != nil && req != nil {
-			logger.Logf("error decoding protobuf response from server:%s: req:%s: err=%s", r.server, req.URL.RequestURI(), err)
+			logger.Logf("error decoding protobuf response from server:%s: req:%s: err=%s", r.server.server, req.URL.RequestURI(), err)
 			logger.Traceln("\n" + hex.Dump(r.response))
 			Metrics.FindErrors.Add(1)
 			continue
@@ -310,10 +310,10 @@ func findHandler(w http.ResponseWriter, req *http.Request) {
 	}
 	// lookup tld in our map of where they live to reduce the set of
 	// servers we bug with our find
-	var backends []string
+	var backends []serverTarget
 	var ok bool
 	if backends, ok = Config.pathCache.get(tld); !ok || backends == nil || len(backends) == 0 {
-		backends = Config.Backends
+		backends = Config.servers
 	}
 
 	responses := multiGet(backends, rewrite.RequestURI())
@@ -376,12 +376,12 @@ func renderHandler(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	var serverList []string
+	var serverList []serverTarget
 	var ok bool
 
 	// lookup the server list for this metric, or use all the servers if it's unknown
 	if serverList, ok = Config.pathCache.get(target); !ok || serverList == nil || len(serverList) == 0 {
-		serverList = Config.Backends
+		serverList = Config.servers  // FIXME
 	}
 
 	format := req.FormValue("format")
@@ -462,7 +462,7 @@ func handleRenderPB(w http.ResponseWriter, req *http.Request, format string, res
 		var d pb.MultiFetchResponse
 		err := d.Unmarshal(r.response)
 		if err != nil {
-			logger.Logf("error decoding protobuf response from server:%s: req:%s: err=%s", r.server, req.URL.RequestURI(), err)
+			logger.Logf("error decoding protobuf response from server:%s: req:%s: err=%s", r.server.server, req.URL.RequestURI(), err)
 			logger.Traceln("\n" + hex.Dump(r.response))
 			Metrics.RenderErrors.Add(1)
 			continue
@@ -557,12 +557,12 @@ func infoHandlerPB(w http.ResponseWriter, req *http.Request, format string, resp
 		var d pb.InfoResponse
 		err := d.Unmarshal(r.response)
 		if err != nil {
-			logger.Logf("error decoding protobuf response from server:%s: req:%s: err=%s", r.server, req.URL.RequestURI(), err)
+			logger.Logf("error decoding protobuf response from server:%s: req:%s: err=%s", r.server.server, req.URL.RequestURI(), err)
 			logger.Traceln("\n" + hex.Dump(r.response))
 			Metrics.InfoErrors.Add(1)
 			continue
 		}
-		decoded[r.server] = d
+		decoded[r.server.server] = d
 	}
 
 	logger.Tracef("request: %s: %v", req.URL.RequestURI(), decoded)
@@ -584,12 +584,12 @@ func infoHandler(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	var serverList []string
+	var serverList []serverTarget
 	var ok bool
 
 	// lookup the server list for this metric, or use all the servers if it's unknown
 	if serverList, ok = Config.pathCache.get(target); !ok || serverList == nil || len(serverList) == 0 {
-		serverList = Config.Backends
+		serverList = Config.servers  // FIXME
 	}
 
 	format := req.FormValue("format")
@@ -728,7 +728,7 @@ func main() {
 
 	if Config.ConcurrencyLimitPerServer != 0 {
 		logger.Logln("Setting concurrencyLimit", Config.ConcurrencyLimitPerServer)
-		Limiter = newServerLimiter(Config.Backends, Config.ConcurrencyLimitPerServer)
+		Limiter = newServerLimiter(Config.servers, Config.ConcurrencyLimitPerServer)
 	}
 
 	// +1 to track every over the number of buckets we track
@@ -834,10 +834,10 @@ func bucketRequestTimes(req *http.Request, t time.Duration) {
 	}
 }
 
-type serverLimiter map[string]chan struct{}
+type serverLimiter map[serverTarget]chan struct{}
 
-func newServerLimiter(servers []string, l int) serverLimiter {
-	sl := make(map[string]chan struct{})
+func newServerLimiter(servers []serverTarget, l int) serverLimiter {
+	sl := make(map[serverTarget]chan struct{})
 
 	for _, s := range servers {
 		sl[s] = make(chan struct{}, l)
@@ -846,14 +846,14 @@ func newServerLimiter(servers []string, l int) serverLimiter {
 	return sl
 }
 
-func (sl serverLimiter) enter(s string) {
+func (sl serverLimiter) enter(s serverTarget) {
 	if sl == nil {
 		return
 	}
 	sl[s] <- struct{}{}
 }
 
-func (sl serverLimiter) leave(s string) {
+func (sl serverLimiter) leave(s serverTarget) {
 	if sl == nil {
 		return
 	}
@@ -864,22 +864,22 @@ type pathCache struct {
 	ec *expirecache.Cache
 }
 
-func (p *pathCache) set(k string, v []string) {
+func (p *pathCache) set(k string, v []serverTarget) {
 	// expire cache entries after 10 minutes
 	const expireDelay = 60 * 10
 	var size uint64
 	for _, vv := range v {
-		size += uint64(len(vv))
+		size += uint64(len(vv.server))
 	}
 
 	p.ec.Set(k, v, size, expireDelay)
 }
 
-func (p *pathCache) get(k string) ([]string, bool) {
+func (p *pathCache) get(k string) ([]serverTarget, bool) {
 	v, ok := p.ec.Get(k)
 	if !ok {
 		return nil, false
 	}
 
-	return v.([]string), true
+	return v.([]serverTarget), true
 }
