@@ -719,7 +719,7 @@ func main() {
 	}
 
 	// +1 to track every over the number of buckets we track
-	timeBuckets = make([]int64, Config.Buckets+1)
+	timeBuckets = make([]int64, Config.Buckets)
 
 	httputil.PublishTrackedConnections("httptrack")
 	expvar.Publish("requestBuckets", expvar.Func(renderTimeBuckets))
