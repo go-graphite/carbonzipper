@@ -718,7 +718,6 @@ func main() {
 		Limiter = newServerLimiter(Config.Backends, Config.ConcurrencyLimitPerServer)
 	}
 
-	// +1 to track every over the number of buckets we track
 	timeBuckets = make([]int64, Config.Buckets)
 
 	httputil.PublishTrackedConnections("httptrack")
