@@ -1,0 +1,24 @@
+[submodule "_vendor/src/github.com/dgryski/go-expirecache"]
+	path = _vendor/src/github.com/dgryski/go-expirecache
+	url = https://github.com/dgryski/go-expirecache.git
+[submodule "_vendor/src/github.com/dgryski/httputil"]
+	path = _vendor/src/github.com/dgryski/httputil
+	url = https://github.com/dgryski/httputil.git
+[submodule "_vendor/src/github.com/facebookgo/grace"]
+	path = _vendor/src/github.com/facebookgo/grace
+	url = https://github.com/facebookgo/grace.git
+[submodule "_vendor/src/github.com/facebookgo/pidfile"]
+	path = _vendor/src/github.com/facebookgo/pidfile
+	url = https://github.com/facebookgo/pidfile.git
+[submodule "_vendor/src/github.com/gogo/protobuf"]
+	path = _vendor/src/github.com/gogo/protobuf
+	url = https://github.com/gogo/protobuf.git
+[submodule "_vendor/src/github.com/kisielk/og-rek"]
+	path = _vendor/src/github.com/kisielk/og-rek
+	url = https://github.com/kisielk/og-rek.git
+[submodule "_vendor/src/github.com/lestrrat/go-file-rotatelogs"]
+	path = _vendor/src/github.com/lestrrat/go-file-rotatelogs
+	url = https://github.com/lestrrat/go-file-rotatelogs.git
+[submodule "_vendor/src/github.com/peterbourgon/g2g"]
+	path = _vendor/src/github.com/peterbourgon/g2g
+	url = https://github.com/peterbourgon/g2g.git
