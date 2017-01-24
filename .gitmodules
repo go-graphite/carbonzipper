@@ -28,3 +28,15 @@
 [submodule "_vendor/src/github.com/facebookgo/httpdown"]
 	path = _vendor/src/github.com/facebookgo/httpdown
 	url = https://github.com/facebookgo/httpdown.git
+[submodule "_vendor/src/github.com/facebookgo/clock"]
+	path = _vendor/src/github.com/facebookgo/clock
+	url = https://github.com/facebookgo/clock.git
+[submodule "_vendor/src/github.com/facebookgo/stats"]
+	path = _vendor/src/github.com/facebookgo/stats
+	url = https://github.com/facebookgo/stats.git
+[submodule "_vendor/src/github.com/lestrrat/go-strftime"]
+	path = _vendor/src/github.com/lestrrat/go-strftime
+	url = https://github.com/lestrrat/go-strftime.git
+[submodule "_vendor/src/github.com/pkg/errors"]
+	path = _vendor/src/github.com/pkg/errors
+	url = https://github.com/pkg/errors.git
