@@ -22,3 +22,9 @@
 [submodule "_vendor/src/github.com/peterbourgon/g2g"]
 	path = _vendor/src/github.com/peterbourgon/g2g
 	url = https://github.com/peterbourgon/g2g.git
+[submodule "_vendor/src/github.com/facebookgo/atomicfile"]
+	path = _vendor/src/github.com/facebookgo/atomicfile
+	url = https://github.com/facebookgo/atomicfile.git
+[submodule "_vendor/src/github.com/facebookgo/httpdown"]
+	path = _vendor/src/github.com/facebookgo/httpdown
+	url = https://github.com/facebookgo/httpdown.git
