@@ -17,7 +17,7 @@ tmp/carbonzipper.tar.gz: carbonzipper
 
 rpm: tmp/carbonzipper.tar.gz
 	cp deploy/buildrpm.sh tmp/buildrpm.sh
-	cd tmp && ./buildrpm.sh ../deploy/carbonzipper.spec.centos `../carbonzipper --version`
+	cd tmp && ./buildrpm.sh ../deploy/carbonzipper.spec.centos `git describe --tags`
 
 submodules:
 	git submodule init
