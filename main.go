@@ -79,7 +79,8 @@ var Metrics = struct {
 	InfoRequests *expvar.Int
 	InfoErrors   *expvar.Int
 
-	Timeouts *expvar.Int
+	Timeouts     *expvar.Int
+	SlowRequests *expvar.Int
 
 	CacheSize  expvar.Func
 	CacheItems expvar.Func
@@ -95,7 +96,8 @@ var Metrics = struct {
 	InfoRequests: expvar.NewInt("info_requests"),
 	InfoErrors:   expvar.NewInt("info_errors"),
 
-	Timeouts: expvar.NewInt("timeouts"),
+	Timeouts:     expvar.NewInt("timeouts"),
+	SlowRequests: expvar.NewInt("slow_requests"),
 }
 
 // BuildVersion is defined at build and reported at startup and as expvar
@@ -839,8 +841,7 @@ func main() {
 		Limiter = newServerLimiter(limiterServers, Config.ConcurrencyLimitPerServer)
 	}
 
-	// +1 to track every over the number of buckets we track
-	timeBuckets = make([]int64, Config.Buckets+1)
+	timeBuckets = make([]int64, Config.Buckets)
 
 	httputil.PublishTrackedConnections("httptrack")
 	expvar.Publish("requestBuckets", expvar.Func(renderTimeBuckets))
@@ -879,6 +880,7 @@ func main() {
 
 		graphite.Register(fmt.Sprintf("carbon.zipper.%s.find_requests", hostname), Metrics.FindRequests)
 		graphite.Register(fmt.Sprintf("carbon.zipper.%s.find_errors", hostname), Metrics.FindErrors)
+		graphite.Register(fmt.Sprintf("carbon.zipper.%s.slow_requests", hostname), Metrics.SlowRequests)
 
 		graphite.Register(fmt.Sprintf("carbon.zipper.%s.render_requests", hostname), Metrics.RenderRequests)
 		graphite.Register(fmt.Sprintf("carbon.zipper.%s.render_errors", hostname), Metrics.RenderErrors)
@@ -957,7 +959,7 @@ func bucketRequestTimes(req *http.Request, t time.Duration) {
 		atomic.AddInt64(&timeBuckets[bucket], 1)
 	} else {
 		// Too big? Increment overflow bucket and log
-		atomic.AddInt64(&timeBuckets[Config.Buckets], 1)
+		Metrics.SlowRequests.Add(1)
 		logger.Logf("Slow Request: %s: %s", t.String(), req.URL.String())
 	}
 }
