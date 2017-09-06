@@ -21,11 +21,11 @@ import (
 	"github.com/dgryski/httputil"
 	"github.com/facebookgo/grace/gracehttp"
 	"github.com/facebookgo/pidfile"
-	cu "github.com/go-graphite/carbonzipper/util/apictx"
 	pb3 "github.com/go-graphite/carbonzipper/carbonzipperpb3"
 	"github.com/go-graphite/carbonzipper/intervalset"
 	"github.com/go-graphite/carbonzipper/mstats"
 	"github.com/go-graphite/carbonzipper/pathcache"
+	cu "github.com/go-graphite/carbonzipper/util/apictx"
 	util "github.com/go-graphite/carbonzipper/util/zipperctx"
 	"github.com/go-graphite/carbonzipper/zipper"
 	pickle "github.com/lomik/og-rek"
@@ -673,9 +673,10 @@ func main() {
 
 		graphite.Register(fmt.Sprintf("%s.%s.timeouts", prefix, hostname), Metrics.Timeouts)
 
-		for i := 0; i <= config.Buckets; i++ {
+		for i := 0; i < config.Buckets; i++ {
 			graphite.Register(fmt.Sprintf("%s.%s.requests_in_%dms_to_%dms", prefix, hostname, i*100, (i+1)*100), bucketEntry(i))
 		}
+		graphite.Register(fmt.Sprintf("%s.%s.requests_in_%dms_to_infinity", prefix, hostname, config.Buckets*100), bucketEntry(config.Buckets))
 
 		graphite.Register(fmt.Sprintf("%s.%s.cache_size", prefix, hostname), Metrics.CacheSize)
 		graphite.Register(fmt.Sprintf("%s.%s.cache_items", prefix, hostname), Metrics.CacheItems)
