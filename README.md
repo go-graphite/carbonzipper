@@ -1,6 +1,8 @@
 carbonzipper: carbonserver proxy for graphite-web
 =================================================
 
+**PLEASE DON'T USE THIS BRANCH IN ANY KIND OF PRODUCTION. IT'S KNOWN TO NOT WORK AT ALL YET**
+
 [![Build Status](https://travis-ci.org/go-graphite/carbonzipper.svg?branch=master)](https://travis-ci.org/go-graphite/carbonzipper)
 
 We are using <a href="https://packagecloud.io/"><img alt="Private Maven, RPM, DEB, PyPi and RubyGem Repository | packagecloud" height="46" src="https://packagecloud.io/images/packagecloud-badge.png" width="158" /></a> to host our packages!

@@ -2,59 +2,27 @@ package zipper
 
 import (
 	"context"
-	"encoding/hex"
 	"fmt"
-	"io/ioutil"
-	"net"
-	"net/http"
+	"math"
 	_ "net/http/pprof"
-	"net/url"
-	"strconv"
 	"time"
 
+	pbgrpc "github.com/go-graphite/carbonzipper/carbonzippergrpcpb"
 	pb3 "github.com/go-graphite/carbonzipper/carbonzipperpb3"
 	"github.com/go-graphite/carbonzipper/limiter"
 	"github.com/go-graphite/carbonzipper/pathcache"
-	cu "github.com/go-graphite/carbonzipper/util/apictx"
-	util "github.com/go-graphite/carbonzipper/util/zipperctx"
-
-	"strings"
 
 	"github.com/lomik/zapwriter"
-	"github.com/satori/go.uuid"
 	"go.uber.org/zap"
 )
 
-// Timeouts is a global structure that contains configuration for zipper Timeouts
-type Timeouts struct {
-	Global       time.Duration `yaml:"global"`
-	AfterStarted time.Duration `yaml:"afterStarted"`
-	Connect      time.Duration `yaml:"connect"`
-}
-
-// CarbonSearch is a global structure that contains carbonsearch related configuration bits
-type CarbonSearch struct {
-	Backend string `yaml:"backend"`
-	Prefix  string `yaml:"prefix"`
-}
-
-// Config is a structure that contains zipper-related configuration bits
-type Config struct {
-	ConcurrencyLimitPerServer int
-	MaxIdleConnsPerHost       int
-	Backends                  []string
-
-	CarbonSearch CarbonSearch
-
-	PathCache         pathcache.PathCache
-	SearchCache       pathcache.PathCache
-	Timeouts          Timeouts
-	KeepAliveInterval time.Duration `yaml:"keepAliveInterval"`
-}
+var ErrTimeoutExceeded = fmt.Errorf("timeout while fetching response")
+var ErrNonFatalErrors = fmt.Errorf("response contains non-fatal errors")
+var ErrNotFound = fmt.Errorf("metric not found")
+var ErrFailedToFetchFmt = "failed to fetch data from server group %v, code %v"
 
 // Zipper provides interface to Zipper-related functions
 type Zipper struct {
-	storageClient *http.Client
 	// Limiter limits our concurrency to a particular server
 	limiter     limiter.ServerLimiter
 	probeTicker *time.Ticker
@@ -67,34 +35,19 @@ type Zipper struct {
 	timeoutKeepAlive       time.Duration
 	keepAliveInterval      time.Duration
 
-	searchBackend    string
 	searchConfigured bool
+	searchBackends   BroadcastGroup
 	searchPrefix     string
 
-	pathCache   pathcache.PathCache
 	searchCache pathcache.PathCache
 
-	backends                  []string
+	// Will broadcast to all servers there
+	storeBackends             BroadcastGroup
 	concurrencyLimitPerServer int
-	maxIdleConnsPerHost       int
 
 	sendStats func(*Stats)
-}
 
-// Stats provides zipper-related statistics
-type Stats struct {
-	Timeouts          int64
-	FindErrors        int64
-	RenderErrors      int64
-	InfoErrors        int64
-	SearchRequests    int64
-	SearchCacheHits   int64
-	SearchCacheMisses int64
-
-	MemoryUsage int64
-
-	CacheMisses int64
-	CacheHits   int64
+	logger *zap.Logger
 }
 
 type nameLeaf struct {
@@ -103,8 +56,73 @@ type nameLeaf struct {
 }
 
 // NewZipper allows to create new Zipper
-func NewZipper(sender func(*Stats), config *Config) *Zipper {
-	logger := zapwriter.Logger("new_zipper")
+func NewZipper(sender func(*Stats), config *Config, logger *zap.Logger) (*Zipper, error) {
+	var err error
+	prefix := config.CarbonSearch.Prefix
+	var searchClientGroup ServerClient
+
+	if config.CarbonSearch.Backend != "" {
+		searchClientGroup, err = NewClientProtobufGroup("search", []string{config.CarbonSearch.Backend}, config.ConcurrencyLimitPerServer, config.MaxIdleConnsPerHost, config.Timeouts.Connect, config.KeepAliveInterval)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		searchClientGroup, err = NewClientGRPCGroup("search", config.CarbonSearchV2.Backends)
+		if err != nil {
+			return nil, err
+		}
+		prefix = config.CarbonSearchV2.Prefix
+	}
+	searchBackends := BroadcastGroup{groupName: "search"}
+	searchBackends.clients = append(searchBackends.clients, searchClientGroup)
+
+	storeBackends := BroadcastGroup{groupName: "root"}
+	if config.Backends != nil && len(config.Backends) != 0 {
+		for _, backend := range config.Backends {
+			client := ClientProtobufGroup{
+				groupName: backend,
+				servers:   []string{backend},
+			}
+
+			storeBackends.clients = append(storeBackends.clients, client)
+		}
+	} else {
+		for _, backend := range config.BackendsV2 {
+			if backend.LBMethod == RoundRobinLB {
+				var client ServerClient
+				if backend.Protocol == GRPC {
+					client, err = NewClientGRPCGroup(backend.GroupName, backend.Servers)
+					if err != nil {
+						return nil, err
+					}
+				} else {
+					client, err = NewClientProtobufGroup(backend.GroupName, backend.Servers, config.ConcurrencyLimitPerServer, config.MaxIdleConnsPerHost, config.Timeouts.Connect, config.KeepAliveInterval)
+					if err != nil {
+						return nil, err
+					}
+				}
+				storeBackends.clients = append(storeBackends.clients, client)
+			} else {
+				for _, server := range backend.ServerGroup.Servers {
+					var client ServerClient
+					if backend.Protocol == GRPC {
+						client, err = NewClientGRPCGroup(server, []string{server})
+						if err != nil {
+							return nil, err
+						}
+					} else {
+						client, err = NewClientProtobufGroup(server, []string{server}, config.ConcurrencyLimitPerServer, config.MaxIdleConnsPerHost, config.Timeouts.Connect, config.KeepAliveInterval)
+						if err != nil {
+							return nil, err
+						}
+					}
+
+					storeBackends.clients = append(storeBackends.clients, client)
+				}
+			}
+		}
+	}
+
 	z := &Zipper{
 		probeTicker: time.NewTicker(10 * time.Minute),
 		ProbeQuit:   make(chan struct{}),
@@ -112,290 +130,52 @@ func NewZipper(sender func(*Stats), config *Config) *Zipper {
 
 		sendStats: sender,
 
-		pathCache:   config.PathCache,
 		searchCache: config.SearchCache,
 
-		storageClient:             &http.Client{},
-		backends:                  config.Backends,
-		searchBackend:             config.CarbonSearch.Backend,
-		searchPrefix:              config.CarbonSearch.Prefix,
-		searchConfigured:          len(config.CarbonSearch.Prefix) > 0 && len(config.CarbonSearch.Backend) > 0,
+		storeBackends:             storeBackends,
+		searchBackends:            searchBackends,
+		searchPrefix:              prefix,
+		searchConfigured:          len(prefix) > 0 && len(searchBackends.clients) > 0,
 		concurrencyLimitPerServer: config.ConcurrencyLimitPerServer,
-		maxIdleConnsPerHost:       config.MaxIdleConnsPerHost,
 		keepAliveInterval:         config.KeepAliveInterval,
 		timeoutAfterAllStarted:    config.Timeouts.AfterStarted,
-		timeout:                   config.Timeouts.Global,
+		timeout:                   config.Timeouts.Render,
 		timeoutConnect:            config.Timeouts.Connect,
+		logger:                    logger,
 	}
 
 	logger.Info("zipper config",
 		zap.Any("config", config),
 	)
 
-	if z.concurrencyLimitPerServer != 0 {
-		limiterServers := z.backends
-		if z.searchConfigured {
-			limiterServers = append(limiterServers, z.searchBackend)
-		}
-		z.limiter = limiter.NewServerLimiter(limiterServers, z.concurrencyLimitPerServer)
-	}
-
-	// configure the storage client
-	z.storageClient.Transport = &http.Transport{
-		MaxIdleConnsPerHost: z.maxIdleConnsPerHost,
-		DialContext: (&net.Dialer{
-			Timeout:   z.timeoutConnect,
-			KeepAlive: z.keepAliveInterval,
-			DualStack: true,
-		}).DialContext,
-	}
-
 	go z.probeTlds()
 
 	z.ProbeForce <- 1
-	return z
-}
-
-// ServerResponse contains response from the zipper
-type ServerResponse struct {
-	server   string
-	response []byte
+	return z, nil
 }
 
 var errNoResponses = fmt.Errorf("No responses fetched from upstream")
 var errNoMetricsFetched = fmt.Errorf("No metrics in the response")
 
-func mergeResponses(responses []ServerResponse, stats *Stats) ([]string, *pb3.MultiFetchResponse) {
-	logger := zapwriter.Logger("zipper_render")
-
-	servers := make([]string, 0, len(responses))
-	metrics := make(map[string][]pb3.FetchResponse)
-
-	for _, r := range responses {
-		var d pb3.MultiFetchResponse
-		err := d.Unmarshal(r.response)
-		if err != nil {
-			logger.Error("error decoding protobuf response",
-				zap.String("server", r.server),
-				zap.Error(err),
-			)
-			logger.Debug("response hexdump",
-				zap.String("response", hex.Dump(r.response)),
-			)
-			stats.RenderErrors++
-			continue
-		}
-		stats.MemoryUsage += int64(d.Size())
-		for _, m := range d.Metrics {
-			metrics[m.GetName()] = append(metrics[m.GetName()], m)
-		}
-		servers = append(servers, r.server)
-	}
-
-	var multi pb3.MultiFetchResponse
-
-	if len(metrics) == 0 {
-		return servers, nil
-	}
-
-	for name, decoded := range metrics {
-		logger.Debug("decoded response",
-			zap.String("name", name),
-			zap.Any("decoded", decoded),
-		)
-
-		if len(decoded) == 1 {
-			logger.Debug("only one decoded response to merge",
-				zap.String("name", name),
-			)
-			m := decoded[0]
-			multi.Metrics = append(multi.Metrics, m)
-			continue
-		}
-
-		// Use the metric with the highest resolution as our base
-		var highest int
-		for i, d := range decoded {
-			if d.GetStepTime() < decoded[highest].GetStepTime() {
-				highest = i
-			}
-		}
-		decoded[0], decoded[highest] = decoded[highest], decoded[0]
-
-		metric := decoded[0]
-
-		mergeValues(&metric, decoded, stats)
-		multi.Metrics = append(multi.Metrics, metric)
-	}
-
-	stats.MemoryUsage += int64(multi.Size())
-
-	return servers, &multi
-}
-
-func mergeValues(metric *pb3.FetchResponse, decoded []pb3.FetchResponse, stats *Stats) {
-	logger := zapwriter.Logger("zipper_render")
-
-	var responseLengthMismatch bool
-	for i := range metric.Values {
-		if !metric.IsAbsent[i] || responseLengthMismatch {
-			continue
-		}
-
-		// found a missing value, find a replacement
-		for other := 1; other < len(decoded); other++ {
-
-			m := decoded[other]
-
-			if len(m.Values) != len(metric.Values) {
-				logger.Error("unable to merge ovalues",
-					zap.Int("metric_values", len(metric.Values)),
-					zap.Int("response_values", len(m.Values)),
-				)
-				// TODO(dgryski): we should remove
-				// decoded[other] from the list of responses to
-				// consider but this assumes that decoded[0] is
-				// the 'highest resolution' response and thus
-				// the one we want to keep, instead of the one
-				// we want to discard
-
-				stats.RenderErrors++
-				responseLengthMismatch = true
-				break
-			}
-
-			// found one
-			if !m.IsAbsent[i] {
-				metric.IsAbsent[i] = false
-				metric.Values[i] = m.Values[i]
-			}
-		}
-	}
-}
-
-func infoUnpackPB(responses []ServerResponse, stats *Stats) map[string]pb3.InfoResponse {
-	logger := zapwriter.Logger("zipper_info").With(zap.String("handler", "info"))
-
-	decoded := make(map[string]pb3.InfoResponse)
-	for _, r := range responses {
-		if r.response == nil {
-			continue
-		}
-		var d pb3.InfoResponse
-		err := d.Unmarshal(r.response)
-		if err != nil {
-			logger.Error("error decoding protobuf response",
-				zap.String("server", r.server),
-				zap.Error(err),
-			)
-			logger.Debug("response hexdump",
-				zap.String("response", hex.Dump(r.response)),
-			)
-			stats.InfoErrors++
-			continue
-		}
-		decoded[r.server] = d
-	}
-
-	logger.Debug("info request",
-		zap.Any("decoded_response", decoded),
-	)
-
-	return decoded
-}
-
-func findUnpackPB(responses []ServerResponse, stats *Stats) ([]pb3.GlobMatch, map[string][]string) {
-	logger := zapwriter.Logger("zipper_find").With(zap.String("handler", "findUnpackPB"))
-
-	// metric -> [server1, ... ]
-	paths := make(map[string][]string)
-	seen := make(map[nameLeaf]bool)
-
-	var metrics []pb3.GlobMatch
-	for _, r := range responses {
-		var metric pb3.GlobResponse
-		err := metric.Unmarshal(r.response)
-		if err != nil {
-			logger.Error("error decoding protobuf response",
-				zap.String("server", r.server),
-				zap.Error(err),
-			)
-			logger.Debug("response hexdump",
-				zap.String("response", hex.Dump(r.response)),
-			)
-			stats.FindErrors += 1
-			continue
-		}
-
-		for _, match := range metric.Matches {
-			n := nameLeaf{match.Path, match.IsLeaf}
-			_, ok := seen[n]
-			if !ok {
-				// we haven't seen this name yet
-				// add the metric to the list of metrics to return
-				metrics = append(metrics, match)
-				seen[n] = true
-			}
-			// add the server to the list of servers that know about this metric
-			p := paths[match.Path]
-			p = append(p, r.server)
-			paths[match.Path] = p
-		}
-	}
-
-	return metrics, paths
-}
-
-func (z *Zipper) doProbe() {
-	stats := &Stats{}
-	logger := zapwriter.Logger("probe")
-	// Generate unique ID on every restart
-	uuid := uuid.NewV4()
-	ctx := util.SetUUID(context.Background(), uuid.String())
-	query := "/metrics/find/?format=protobuf&query=%2A"
-
-	responses := z.multiGet(ctx, logger, z.backends, query, stats)
-
-	if len(responses) == 0 {
-		logger.Info("TLD Probe returned empty set")
-		return
-	}
-
-	_, paths := findUnpackPB(responses, stats)
-
-	z.sendStats(stats)
-
-	incompleteResponse := false
-	if len(responses) != len(z.backends) {
-		incompleteResponse = true
-	}
-
-	logger.Info("TLD Probe run results",
-		zap.String("carbonzipper_uuid", uuid.String()),
-		zap.Int("paths_count", len(paths)),
-		zap.Int("responses_received", len(responses)),
-		zap.Int("backends", len(z.backends)),
-		zap.Bool("incomplete_response", incompleteResponse),
-	)
-
-	// update our cache of which servers have which metrics
-	for k, v := range paths {
-		z.pathCache.Set(k, v)
-		logger.Debug("TLD Probe",
-			zap.String("path", k),
-			zap.Strings("servers", v),
-			zap.String("carbonzipper_uuid", uuid.String()),
+func (z *Zipper) doProbe(logger *zap.Logger) {
+	ctx, cancel := context.WithTimeout(context.Background(), z.timeout)
+	_, err := z.storeBackends.ProbeTLDs(ctx)
+	if err != nil {
+		logger.Error("failed to probe tlds",
+			zap.Error(err),
 		)
 	}
+	cancel()
 }
 
 func (z *Zipper) probeTlds() {
+	logger := zapwriter.Logger("probe")
 	for {
 		select {
 		case <-z.probeTicker.C:
-			z.doProbe()
+			z.doProbe(logger)
 		case <-z.ProbeForce:
-			z.doProbe()
+			z.doProbe(logger)
 		case <-z.ProbeQuit:
 			z.probeTicker.Stop()
 			return
@@ -403,343 +183,147 @@ func (z *Zipper) probeTlds() {
 	}
 }
 
-func (z *Zipper) singleGet(ctx context.Context, logger *zap.Logger, uri, server string, ch chan<- ServerResponse, started chan<- struct{}) {
-	logger = logger.With(zap.String("handler", "singleGet"))
+// GRPC-compatible methods
+func (z Zipper) FetchGRPC(ctx context.Context, query []string, startTime, stopTime int32) (*pbgrpc.MultiFetchResponse, *Stats, error) {
 
-	u, err := url.Parse(server + uri)
-	if err != nil {
-		logger.Error("error parsing uri",
-			zap.String("uri", server+uri),
-			zap.Error(err),
-		)
-		ch <- ServerResponse{server, nil}
-		return
-	}
-	req, err := http.NewRequest("GET", u.String(), nil)
-	if err != nil {
-		logger.Error("failed to create new request",
-			zap.Error(err),
-		)
-	}
-	req = cu.MarshalCtx(ctx, util.MarshalCtx(ctx, req))
+	return nil, nil, errNotImplementedYet
+}
+func (z Zipper) FindGRPC(ctx context.Context, query []string) (*pbgrpc.GlobResponse, *Stats, error) {
 
-	logger = logger.With(zap.String("query", server+"/"+uri))
-	z.limiter.Enter(server)
-	started <- struct{}{}
-	defer z.limiter.Leave(server)
-	resp, err := z.storageClient.Do(req.WithContext(ctx))
-	if err != nil {
-		logger.Error("query error",
-			zap.Error(err),
-		)
-		ch <- ServerResponse{server, nil}
-		return
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == http.StatusNotFound {
-		// carbonsserver replies with Not Found if we request a
-		// metric that it doesn't have -- makes sense
-		ch <- ServerResponse{server, nil}
-		return
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		logger.Error("bad response code",
-			zap.Int("response_code", resp.StatusCode),
-		)
-		ch <- ServerResponse{server, nil}
-		return
-	}
-
-	body, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		logger.Error("error reading body",
-			zap.Error(err),
-		)
-		ch <- ServerResponse{server, nil}
-		return
-	}
-
-	ch <- ServerResponse{server, body}
+	return nil, nil, errNotImplementedYet
 }
 
-func (z *Zipper) multiGet(ctx context.Context, logger *zap.Logger, servers []string, uri string, stats *Stats) []ServerResponse {
-	logger = logger.With(zap.String("handler", "multiGet"))
-	logger.Debug("querying servers",
-		zap.Strings("servers", servers),
-		zap.String("uri", uri),
-	)
+func (z Zipper) InfoGRPC(ctx context.Context) (*pbgrpc.ZipperInfoResponse, *Stats, error) {
 
-	// buffered channel so the goroutines don't block on send
-	ch := make(chan ServerResponse, len(servers))
-	startedch := make(chan struct{}, len(servers))
+	return nil, nil, errNotImplementedYet
+}
+func (z Zipper) ListGRPC(ctx context.Context) (*pbgrpc.ListMetricsResponse, *Stats, error) {
 
-	for _, server := range servers {
-		go z.singleGet(ctx, logger, uri, server, ch, startedch)
-	}
+	return nil, nil, errNotImplementedYet
+}
+func (z Zipper) StatsGRPC(ctx context.Context) (*pbgrpc.MetricDetailsResponse, *Stats, error) {
 
-	var response []ServerResponse
-
-	timeout := time.After(z.timeout)
-
-	var responses int
-	var started int
-
-GATHER:
-	for {
-		select {
-		case <-startedch:
-			started++
-			if started == len(servers) {
-				timeout = time.After(z.timeoutAfterAllStarted)
-			}
-
-		case r := <-ch:
-			responses++
-			if r.response != nil {
-				response = append(response, r)
-			}
-
-			if responses == len(servers) {
-				break GATHER
-			}
-
-		case <-timeout:
-			var servs []string
-			for _, r := range response {
-				servs = append(servs, r.server)
-			}
-
-			var timeoutedServs []string
-			for i := range servers {
-				found := false
-				for j := range servs {
-					if servers[i] == servs[j] {
-						found = true
-						break
-					}
-				}
-				if !found {
-					timeoutedServs = append(timeoutedServs, servers[i])
-				}
-			}
-
-			logger.Warn("timeout waiting for more responses",
-				zap.String("uri", uri),
-				zap.Strings("timeouted_servers", timeoutedServs),
-				zap.Strings("answers_from_servers", servs),
-			)
-			stats.Timeouts++
-			break GATHER
-		}
-	}
-
-	return response
+	return nil, nil, errNotImplementedYet
 }
 
-func (z *Zipper) fetchCarbonsearchResponse(ctx context.Context, logger *zap.Logger, url string, stats *Stats) []string {
-	// Send query to SearchBackend. The result is []queries for StorageBackends
-	searchResponse := z.multiGet(ctx, logger, []string{z.searchBackend}, url, stats)
-	m, _ := findUnpackPB(searchResponse, stats)
-
-	queries := make([]string, 0, len(m))
-	for _, v := range m {
-		queries = append(queries, v.Path)
+// PB3-compatible methods
+func (z Zipper) FetchPB(ctx context.Context, query []string, startTime, stopTime int32) (*pb3.MultiFetchResponse, *Stats, error) {
+	grpcRes, stats, err := z.FetchGRPC(ctx, query, startTime, stopTime)
+	if err != nil {
+		return nil, nil, err
 	}
-	return queries
-}
 
-func (z *Zipper) Render(ctx context.Context, logger *zap.Logger, target string, from, until int32) (*pb3.MultiFetchResponse, *Stats, error) {
-	stats := &Stats{}
-
-	rewrite, _ := url.Parse("http://127.0.0.1/render/")
-
-	v := url.Values{
-		"target": []string{target},
-		"format": []string{"protobuf"},
-		"from":   []string{strconv.Itoa(int(from))},
-		"until":  []string{strconv.Itoa(int(until))},
-	}
-	rewrite.RawQuery = v.Encode()
-
-	var serverList []string
-	var ok bool
-	var responses []ServerResponse
-	if z.searchConfigured && strings.HasPrefix(target, z.searchPrefix) {
-		stats.SearchRequests++
-
-		var metrics []string
-		if metrics, ok = z.searchCache.Get(target); !ok || metrics == nil || len(metrics) == 0 {
-			stats.SearchCacheMisses++
-			findURL := &url.URL{Path: "/metrics/find/"}
-			findValues := url.Values{}
-			findValues.Set("format", "protobuf")
-			findValues.Set("query", target)
-			findURL.RawQuery = findValues.Encode()
-
-			metrics = z.fetchCarbonsearchResponse(ctx, logger, findURL.RequestURI(), stats)
-			z.searchCache.Set(target, metrics)
-		} else {
-			stats.SearchCacheHits++
-		}
-
-		for _, target := range metrics {
-			v.Set("target", target)
-			rewrite.RawQuery = v.Encode()
-
-			// lookup the server list for this metric, or use all the servers if it's unknown
-			if serverList, ok = z.pathCache.Get(target); !ok || serverList == nil || len(serverList) == 0 {
-				stats.CacheMisses++
-				serverList = z.backends
+	var res pb3.MultiFetchResponse
+	for i := range grpcRes.Metrics {
+		vals := make([]float64, 0, len(grpcRes.Metrics[i].Values))
+		isAbsent := make([]bool, 0, len(grpcRes.Metrics[i].Values))
+		for _, v := range grpcRes.Metrics[i].Values {
+			if math.IsNaN(v) {
+				vals = append(vals, 0)
+				isAbsent = append(isAbsent, true)
 			} else {
-				stats.CacheHits++
+				vals = append(vals, v)
+				isAbsent = append(isAbsent, false)
 			}
-
-			newResponses := z.multiGet(ctx, logger, serverList, rewrite.RequestURI(), stats)
-			responses = append(responses, newResponses...)
 		}
-	} else {
-		rewrite.RawQuery = v.Encode()
-
-		// lookup the server list for this metric, or use all the servers if it's unknown
-		if serverList, ok = z.pathCache.Get(target); !ok || serverList == nil || len(serverList) == 0 {
-			stats.CacheMisses++
-			serverList = z.backends
-		} else {
-			stats.CacheHits++
-		}
-
-		responses = z.multiGet(ctx, logger, serverList, rewrite.RequestURI(), stats)
+		res.Metrics = append(res.Metrics,
+			pb3.FetchResponse{
+				Name:      grpcRes.Metrics[i].Name,
+				StartTime: int32(grpcRes.Metrics[i].StartTime),
+				StopTime:  int32(grpcRes.Metrics[i].StopTime),
+				StepTime:  int32(grpcRes.Metrics[i].Metadata.StepTime),
+				Values:    vals,
+				IsAbsent:  isAbsent,
+			})
 	}
 
-	for i := range responses {
-		stats.MemoryUsage += int64(len(responses[i].response))
-	}
-
-	if len(responses) == 0 {
-		return nil, stats, errNoResponses
-	}
-
-	servers, metrics := mergeResponses(responses, stats)
-
-	if metrics == nil {
-		return nil, stats, errNoMetricsFetched
-	}
-
-	z.pathCache.Set(target, servers)
-
-	return metrics, stats, nil
+	return &res, stats, nil
 }
 
-func (z *Zipper) Info(ctx context.Context, logger *zap.Logger, target string) (map[string]pb3.InfoResponse, *Stats, error) {
-	stats := &Stats{}
-	var serverList []string
-	var ok bool
-
-	// lookup the server list for this metric, or use all the servers if it's unknown
-	if serverList, ok = z.pathCache.Get(target); !ok || serverList == nil || len(serverList) == 0 {
-		stats.CacheMisses++
-		serverList = z.backends
-	} else {
-		stats.CacheHits++
+func (z Zipper) FindPB(ctx context.Context, query []string) (*pb3.GlobResponse, *Stats, error) {
+	grpcRes, stats, err := z.FindGRPC(ctx, query)
+	if err != nil {
+		return nil, nil, err
 	}
 
-	rewrite, _ := url.Parse("http://127.0.0.1/info/")
-
-	v := url.Values{
-		"target": []string{target},
-		"format": []string{"protobuf"},
-	}
-	rewrite.RawQuery = v.Encode()
-
-	responses := z.multiGet(ctx, logger, serverList, rewrite.RequestURI(), stats)
-
-	if len(responses) == 0 {
-		stats.InfoErrors++
-		return nil, stats, errNoResponses
+	res := &pb3.GlobResponse{
+		Name: grpcRes.Name,
 	}
 
-	infos := infoUnpackPB(responses, stats)
-	return infos, stats, nil
+	for _, v := range grpcRes.Matches {
+		match := pb3.GlobMatch{
+			Path:   v.Path,
+			IsLeaf: v.IsLeaf,
+		}
+		res.Matches = append(res.Matches, match)
+	}
+
+	return res, stats, nil
 }
 
-func (z *Zipper) Find(ctx context.Context, logger *zap.Logger, query string) ([]pb3.GlobMatch, *Stats, error) {
-	stats := &Stats{}
-	queries := []string{query}
-
-	rewrite, _ := url.Parse("http://127.0.0.1/metrics/find/")
-
-	v := url.Values{
-		"query":  queries,
-		"format": []string{"protobuf"},
-	}
-	rewrite.RawQuery = v.Encode()
-
-	if z.searchConfigured && strings.HasPrefix(query, z.searchPrefix) {
-		stats.SearchRequests++
-		// 'completer' requests are translated into standard Find requests with
-		// a trailing '*' by graphite-web
-		if strings.HasSuffix(query, "*") {
-			searchCompleterResponse := z.multiGet(ctx, logger, []string{z.searchBackend}, rewrite.RequestURI(), stats)
-			matches, _ := findUnpackPB(searchCompleterResponse, stats)
-			// this is a completer request, and so we should return the set of
-			// virtual metrics returned by carbonsearch verbatim, rather than trying
-			// to find them on the stores
-			return matches, stats, nil
-		}
-		var ok bool
-		if queries, ok = z.searchCache.Get(query); !ok || queries == nil || len(queries) == 0 {
-			stats.SearchCacheMisses++
-			queries = z.fetchCarbonsearchResponse(ctx, logger, rewrite.RequestURI(), stats)
-			z.searchCache.Set(query, queries)
-		} else {
-			stats.SearchCacheHits++
-		}
+func (z Zipper) InfoPB(ctx context.Context) (*pb3.ZipperInfoResponse, *Stats, error) {
+	grpcRes, stats, err := z.InfoGRPC(ctx)
+	if err != nil {
+		return nil, nil, err
 	}
 
-	var metrics []pb3.GlobMatch
-	// TODO(nnuss): Rewrite the result queries to a series of brace expansions based on TLD?
-	// [a.b, a.c, a.dee.eee.eff, x.y] => [ "a.{b,c,dee.eee.eff}", "x.y" ]
-	// Be mindful that carbonserver's default MaxGlobs is 10
-	for _, query := range queries {
+	res := &pb3.ZipperInfoResponse{}
 
-		v.Set("query", query)
-		rewrite.RawQuery = v.Encode()
-
-		var tld string
-		if i := strings.IndexByte(query, '.'); i > 0 {
-			tld = query[:i]
+	for _, v := range grpcRes.Responses {
+		rets := make([]pb3.Retention, 0, len(v.Info.Retentions))
+		for _, ret := range v.Info.Retentions {
+			rets = append(rets, pb3.Retention{
+				SecondsPerPoint: int32(ret.SecondsPerPoint),
+				NumberOfPoints:  int32(ret.NumberOfPoints),
+			})
 		}
-
-		// lookup tld in our map of where they live to reduce the set of
-		// servers we bug with our find
-		var backends []string
-		var ok bool
-		if backends, ok = z.pathCache.Get(tld); !ok || backends == nil || len(backends) == 0 {
-			stats.CacheMisses++
-			backends = z.backends
-		} else {
-			stats.CacheHits++
+		i := &pb3.InfoResponse{
+			Name:              v.Info.Name,
+			AggregationMethod: v.Info.AggregationMethod,
+			MaxRetention:      int32(v.Info.MaxRetention),
+			XFilesFactor:      v.Info.XFilesFactor,
+			Retentions:        rets,
 		}
-
-		responses := z.multiGet(ctx, logger, backends, rewrite.RequestURI(), stats)
-
-		if len(responses) == 0 {
-			return nil, stats, errNoResponses
-		}
-
-		m, paths := findUnpackPB(responses, stats)
-		metrics = append(metrics, m...)
-
-		// update our cache of which servers have which metrics
-		allServers := make([]string, 0)
-		for k, v := range paths {
-			z.pathCache.Set(k, v)
-			allServers = append(allServers, v...)
-		}
-		z.pathCache.Set(query, allServers)
+		res.Responses = append(res.Responses, pb3.ServerInfoResponse{
+			Server: v.Server,
+			Info:   i,
+		})
 	}
 
-	return metrics, stats, nil
+	return res, stats, nil
+}
+func (z Zipper) ListPB(ctx context.Context) (*pb3.ListMetricsResponse, *Stats, error) {
+	grpcRes, stats, err := z.ListGRPC(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	res := &pb3.ListMetricsResponse{
+		Metrics: grpcRes.Metrics,
+	}
+	return res, stats, nil
+}
+func (z Zipper) StatsPB(ctx context.Context) (*pb3.MetricDetailsResponse, *Stats, error) {
+	grpcRes, stats, err := z.StatsGRPC(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	metrics := make(map[string]*pb3.MetricDetails, len(grpcRes.Metrics))
+	for k, v := range grpcRes.Metrics {
+		metrics[k] = &pb3.MetricDetails{
+			Size_:   v.Size_,
+			ModTime: v.ModTime,
+			ATime:   v.ATime,
+			RdTime:  v.RdTime,
+		}
+	}
+
+	res := &pb3.MetricDetailsResponse{
+		FreeSpace:  grpcRes.FreeSpace,
+		TotalSpace: grpcRes.TotalSpace,
+		Metrics:    metrics,
+	}
+
+	return res, stats, nil
 }

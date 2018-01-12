@@ -5,6 +5,18 @@ import (
 	"expvar"
 	"flag"
 	"fmt"
+	"github.com/dgryski/httputil"
+	"github.com/facebookgo/grace/gracehttp"
+	"github.com/facebookgo/pidfile"
+	pb3 "github.com/go-graphite/carbonzipper/carbonzipperpb3"
+	"github.com/go-graphite/carbonzipper/intervalset"
+	"github.com/go-graphite/carbonzipper/mstats"
+	"github.com/go-graphite/carbonzipper/pathcache"
+	cu "github.com/go-graphite/carbonzipper/util/apictx"
+	util "github.com/go-graphite/carbonzipper/util/zipperctx"
+	"github.com/go-graphite/carbonzipper/zipper"
+	"github.com/go-graphite/carbonzipper/zipper"
+	"gopkg.in/yaml.v2"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -16,22 +28,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"gopkg.in/yaml.v2"
+	"github.com/lomik/zapwriter"
 
-	"github.com/dgryski/httputil"
-	"github.com/facebookgo/grace/gracehttp"
-	"github.com/facebookgo/pidfile"
-	pb3 "github.com/go-graphite/carbonzipper/carbonzipperpb3"
-	"github.com/go-graphite/carbonzipper/intervalset"
-	"github.com/go-graphite/carbonzipper/mstats"
-	"github.com/go-graphite/carbonzipper/pathcache"
-	cu "github.com/go-graphite/carbonzipper/util/apictx"
-	util "github.com/go-graphite/carbonzipper/util/zipperctx"
-	"github.com/go-graphite/carbonzipper/zipper"
 	pickle "github.com/lomik/og-rek"
 	"github.com/peterbourgon/g2g"
 
-	"github.com/lomik/zapwriter"
 	"github.com/satori/go.uuid"
 	"go.uber.org/zap"
 )
@@ -55,11 +56,12 @@ type GraphiteConfig struct {
 
 // config contains necessary information for global
 var config = struct {
-	Backends []string       `yaml:"backends"`
-	MaxProcs int            `yaml:"maxProcs"`
-	Graphite GraphiteConfig `yaml:"graphite"`
-	Listen   string         `yaml:"listen"`
-	Buckets  int            `yaml:"buckets"`
+	Backends   []string       `yaml:"backends"`
+	MaxProcs   int            `yaml:"maxProcs"`
+	Graphite   GraphiteConfig `yaml:"graphite"`
+	GRPCListen string         `yaml:"grpcListen"`
+	Listen     string         `yaml:"listen"`
+	Buckets    int            `yaml:"buckets"`
 
 	Timeouts          zipper.Timeouts `yaml:"timeouts"`
 	KeepAliveInterval time.Duration   `yaml:"keepAliveInterval"`
@@ -73,7 +75,7 @@ var config = struct {
 	Logger                     []zapwriter.Config `yaml:"logger"`
 	GraphiteWeb09Compatibility bool               `yaml:"graphite09compat"`
 
-	zipper *zipper.Zipper
+	zipper   *zipper.Zipper
 }{
 	MaxProcs: 1,
 	Graphite: GraphiteConfig{
@@ -81,11 +83,12 @@ var config = struct {
 		Prefix:   "carbon.zipper",
 		Pattern:  "{prefix}.{fqdn}",
 	},
-	Listen:  ":8080",
-	Buckets: 10,
+	GRPCListen: ":8081",
+	Listen:     ":8080",
+	Buckets:    10,
 
 	Timeouts: zipper.Timeouts{
-		Global:       10000 * time.Second,
+		Render:       10000 * time.Second,
 		AfterStarted: 2 * time.Second,
 		Connect:      200 * time.Millisecond,
 	},
@@ -192,10 +195,10 @@ func findHandler(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	err = encodeFindResponse(format, originalQuery, w, metrics)
+	err = EncodeFindResponse(format, originalQuery, w, metrics)
 	if err != nil {
 		http.Error(w, "error marshaling data", http.StatusInternalServerError)
-		accessLogger.Error("render failed",
+		accessLogger.Error("find failed",
 			zap.Int("http_code", http.StatusInternalServerError),
 			zap.String("reason", "error marshaling data"),
 			zap.Duration("runtime_seconds", time.Since(t0)),
@@ -209,7 +212,7 @@ func findHandler(w http.ResponseWriter, req *http.Request) {
 	)
 }
 
-func encodeFindResponse(format, query string, w http.ResponseWriter, metrics []pb3.GlobMatch) error {
+func EncodeFindResponse(format, query string, w http.ResponseWriter, metrics []pb3.GlobMatch) error {
 	var err error
 	var b []byte
 	switch format {
@@ -713,6 +716,17 @@ func main() {
 		if err != nil {
 			log.Fatalln("error during pidfile.Write():", err)
 		}
+	}
+
+	if len(config.GRPCListen) > 0 {
+		config.zipper = zipper.NewZipper(sendStats, zipperConfig)
+		srv, err := NewGRPCServer(config.GRPCListen)
+		if err != nil {
+			logger.Fatal("failed to start gRPC server",
+				zap.Error(err),
+			)
+		}
+		go srv.serve()
 	}
 
 	err = gracehttp.Serve(&http.Server{
