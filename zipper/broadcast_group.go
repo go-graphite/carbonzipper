@@ -114,10 +114,10 @@ func (bg BroadcastGroup) Info(ctx context.Context, request *pbgrpc.MultiMetricsI
 	return nil, nil, ErrNotImplementedYet
 }
 
-func (bg BroadcastGroup) List(ctx context.Context, servers []string) (*pbgrpc.ListMetricsResponse, *Stats, error) {
+func (bg BroadcastGroup) List(ctx context.Context) (*pbgrpc.ListMetricsResponse, *Stats, error) {
 	return nil, nil, ErrNotImplementedYet
 }
-func (bg BroadcastGroup) Stats(ctx context.Context, servers []string) (*pbgrpc.MetricDetailsResponse, *Stats, error) {
+func (bg BroadcastGroup) Stats(ctx context.Context) (*pbgrpc.MetricDetailsResponse, *Stats, error) {
 	return nil, nil, ErrNotImplementedYet
 }
 

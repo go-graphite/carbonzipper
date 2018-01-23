@@ -114,7 +114,7 @@ func (c ClientGRPCGroup) Info(ctx context.Context, request *pbgrpc.MultiMetricsI
 	return res, stats, err
 }
 
-func (c ClientGRPCGroup) List(ctx context.Context, servers []string) (*pbgrpc.ListMetricsResponse, *Stats, error) {
+func (c ClientGRPCGroup) List(ctx context.Context) (*pbgrpc.ListMetricsResponse, *Stats, error) {
 	stats := &Stats{
 		Servers: []string{c.Name()},
 	}
@@ -129,7 +129,7 @@ func (c ClientGRPCGroup) List(ctx context.Context, servers []string) (*pbgrpc.Li
 
 	return res, stats, err
 }
-func (c ClientGRPCGroup) Stats(ctx context.Context, servers []string) (*pbgrpc.MetricDetailsResponse, *Stats, error) {
+func (c ClientGRPCGroup) Stats(ctx context.Context) (*pbgrpc.MetricDetailsResponse, *Stats, error) {
 	stats := &Stats{
 		Servers: []string{c.Name()},
 	}

@@ -178,22 +178,30 @@ func (z Zipper) FetchGRPC(ctx context.Context, request *pbgrpc.MultiFetchRequest
 	return z.storeBackends.Fetch(ctx, request)
 }
 
-// TODO(civil): Change them to accept pbgrpc.MultiGlobRequest
 func (z Zipper) FindGRPC(ctx context.Context, request *pbgrpc.MultiGlobRequest) (*pbgrpc.MultiGlobResponse, *Stats, error) {
 	return z.storeBackends.Find(ctx, request)
 }
 
-func (z Zipper) InfoGRPC(ctx context.Context, targets []string) (*pbgrpc.ZipperInfoResponse, *Stats, error) {
+func (z Zipper) InfoGRPC(ctx context.Context, request *pbgrpc.MultiMetricsInfoRequest) (*pbgrpc.ZipperInfoResponse, *Stats, error) {
+	res, stats, err := z.storeBackends.Info(ctx, request)
+	if err != nil {
+		return nil, stats, err
+	}
 
-	return nil, nil, ErrNotImplementedYet
+	r := &pbgrpc.ZipperInfoResponse{}
+	for _, i := range res.Info {
+		r.Responses = append(r.Responses, pbgrpc.MetricsInfoResponse{
+			Server: res.Server,
+			Info:   &i,
+		})
+	}
+	return r, stats, nil
 }
 func (z Zipper) ListGRPC(ctx context.Context) (*pbgrpc.ListMetricsResponse, *Stats, error) {
-
-	return nil, nil, ErrNotImplementedYet
+	return z.storeBackends.List(ctx)
 }
 func (z Zipper) StatsGRPC(ctx context.Context) (*pbgrpc.MetricDetailsResponse, *Stats, error) {
-
-	return nil, nil, ErrNotImplementedYet
+	return z.storeBackends.Stats(ctx)
 }
 
 // PB3-compatible methods
@@ -269,7 +277,10 @@ func (z Zipper) FindPB(ctx context.Context, query []string) ([]*pb3.GlobResponse
 }
 
 func (z Zipper) InfoPB(ctx context.Context, targets []string) (*pb3.ZipperInfoResponse, *Stats, error) {
-	grpcRes, stats, err := z.InfoGRPC(ctx, targets)
+	request := &pbgrpc.MultiMetricsInfoRequest{
+		Names: targets,
+	}
+	grpcRes, stats, err := z.InfoGRPC(ctx, request)
 	if err != nil {
 		return nil, nil, err
 	}

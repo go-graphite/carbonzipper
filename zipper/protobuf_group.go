@@ -251,10 +251,10 @@ func (c ClientProtobufGroup) Info(ctx context.Context, request *pbgrpc.MultiMetr
 	return nil, nil, ErrNotImplementedYet
 }
 
-func (c ClientProtobufGroup) List(ctx context.Context, servers []string) (*pbgrpc.ListMetricsResponse, *Stats, error) {
+func (c ClientProtobufGroup) List(ctx context.Context) (*pbgrpc.ListMetricsResponse, *Stats, error) {
 	return nil, nil, ErrNotImplementedYet
 }
-func (c ClientProtobufGroup) Stats(ctx context.Context, servers []string) (*pbgrpc.MetricDetailsResponse, *Stats, error) {
+func (c ClientProtobufGroup) Stats(ctx context.Context) (*pbgrpc.MetricDetailsResponse, *Stats, error) {
 	return nil, nil, ErrNotImplementedYet
 }
 

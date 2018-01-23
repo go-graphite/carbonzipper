@@ -173,8 +173,8 @@ type ServerClient interface {
 	Find(ctx context.Context, request *pbgrpc.MultiGlobRequest) (*pbgrpc.MultiGlobResponse, *Stats, error)
 	Info(ctx context.Context, request *pbgrpc.MultiMetricsInfoRequest) (*pbgrpc.MultiMetricsInfoResponse, *Stats, error)
 
-	List(ctx context.Context, servers []string) (*pbgrpc.ListMetricsResponse, *Stats, error)
-	Stats(ctx context.Context, servers []string) (*pbgrpc.MetricDetailsResponse, *Stats, error)
+	List(ctx context.Context) (*pbgrpc.ListMetricsResponse, *Stats, error)
+	Stats(ctx context.Context) (*pbgrpc.MetricDetailsResponse, *Stats, error)
 
 	ProbeTLDs(ctx context.Context) ([]string, error)
 }
@@ -184,7 +184,7 @@ type Fetcher interface {
 	FetchPB(ctx context.Context, query []string, startTime, stopTime int32) (*pb3.MultiFetchResponse, *Stats, error)
 	FindPB(ctx context.Context, query []string) (*pb3.GlobResponse, *Stats, error)
 
-	InfoPB(ctx context.Context) (*pb3.ZipperInfoResponse, *Stats, error)
+	InfoPB(ctx context.Context, targets []string) (*pb3.ZipperInfoResponse, *Stats, error)
 	ListPB(ctx context.Context) (*pb3.ListMetricsResponse, *Stats, error)
 	StatsPB(ctx context.Context) (*pb3.MetricDetailsResponse, *Stats, error)
 
@@ -192,7 +192,7 @@ type Fetcher interface {
 	FetchGRPC(ctx context.Context, request *pbgrpc.MultiFetchRequest) (*pbgrpc.MultiFetchResponse, *Stats, error)
 	FindGRPC(ctx context.Context, request *pbgrpc.MultiGlobRequest) ([]*pbgrpc.MultiGlobResponse, *Stats, error)
 
-	InfoGRPC(ctx context.Context) (*pbgrpc.ZipperInfoResponse, *Stats, error)
+	InfoGRPC(ctx context.Context, request *pbgrpc.MultiMetricsInfoRequest) (*pbgrpc.ZipperInfoResponse, *Stats, error)
 	ListGRPC(ctx context.Context) (*pbgrpc.ListMetricsResponse, *Stats, error)
 	StatsGRPC(ctx context.Context) (*pbgrpc.MetricDetailsResponse, *Stats, error)
 }
