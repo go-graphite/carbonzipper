@@ -16,8 +16,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"gopkg.in/yaml.v2"
-
 	"github.com/dgryski/httputil"
 	"github.com/facebookgo/grace/gracehttp"
 	"github.com/facebookgo/pidfile"
@@ -28,10 +26,13 @@ import (
 	cu "github.com/go-graphite/carbonzipper/util/apictx"
 	util "github.com/go-graphite/carbonzipper/util/zipperctx"
 	"github.com/go-graphite/carbonzipper/zipper"
+	"gopkg.in/yaml.v2"
+
+	"github.com/lomik/zapwriter"
+
 	pickle "github.com/lomik/og-rek"
 	"github.com/peterbourgon/g2g"
 
-	"github.com/lomik/zapwriter"
 	"github.com/satori/go.uuid"
 	"go.uber.org/zap"
 )
@@ -55,11 +56,12 @@ type GraphiteConfig struct {
 
 // config contains necessary information for global
 var config = struct {
-	Backends []string       `yaml:"backends"`
-	MaxProcs int            `yaml:"maxProcs"`
-	Graphite GraphiteConfig `yaml:"graphite"`
-	Listen   string         `yaml:"listen"`
-	Buckets  int            `yaml:"buckets"`
+	Backends   []string       `yaml:"backends"`
+	MaxProcs   int            `yaml:"maxProcs"`
+	Graphite   GraphiteConfig `yaml:"graphite"`
+	GRPCListen string         `yaml:"grpcListen"`
+	Listen     string         `yaml:"listen"`
+	Buckets    int            `yaml:"buckets"`
 
 	Timeouts          zipper.Timeouts `yaml:"timeouts"`
 	KeepAliveInterval time.Duration   `yaml:"keepAliveInterval"`
@@ -81,11 +83,12 @@ var config = struct {
 		Prefix:   "carbon.zipper",
 		Pattern:  "{prefix}.{fqdn}",
 	},
-	Listen:  ":8080",
-	Buckets: 10,
+	GRPCListen: ":8081",
+	Listen:     ":8080",
+	Buckets:    10,
 
 	Timeouts: zipper.Timeouts{
-		Global:       10000 * time.Second,
+		Render:       10000 * time.Second,
 		AfterStarted: 2 * time.Second,
 		Connect:      200 * time.Millisecond,
 	},
@@ -180,7 +183,7 @@ func findHandler(w http.ResponseWriter, req *http.Request) {
 		zap.String("carbonapi_uuid", cu.GetUUID(ctx)),
 	)
 
-	metrics, stats, err := config.zipper.Find(ctx, logger, originalQuery)
+	metrics, stats, err := config.zipper.FindPB(ctx, []string{originalQuery})
 	sendStats(stats)
 	if err != nil {
 		accessLogger.Error("find failed",
@@ -192,10 +195,11 @@ func findHandler(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	err = encodeFindResponse(format, originalQuery, w, metrics)
+	// There should be exactly one match at this moment
+	err = EncodeFindResponse(format, originalQuery, w, metrics[0].Matches)
 	if err != nil {
 		http.Error(w, "error marshaling data", http.StatusInternalServerError)
-		accessLogger.Error("render failed",
+		accessLogger.Error("find failed",
 			zap.Int("http_code", http.StatusInternalServerError),
 			zap.String("reason", "error marshaling data"),
 			zap.Duration("runtime_seconds", time.Since(t0)),
@@ -209,7 +213,7 @@ func findHandler(w http.ResponseWriter, req *http.Request) {
 	)
 }
 
-func encodeFindResponse(format, query string, w http.ResponseWriter, metrics []pb3.GlobMatch) error {
+func EncodeFindResponse(format, query string, w http.ResponseWriter, metrics []pb3.GlobMatch) error {
 	var err error
 	var b []byte
 	switch format {
@@ -296,11 +300,11 @@ func renderHandler(w http.ResponseWriter, req *http.Request) {
 		)
 		return
 	}
-	target := req.FormValue("target")
+	targets := req.Form["target"]
 	format := req.FormValue("format")
 	accessLogger = accessLogger.With(
 		zap.String("format", format),
-		zap.String("target", target),
+		zap.Strings("targets", targets),
 	)
 
 	from, err := strconv.Atoi(req.FormValue("from"))
@@ -326,7 +330,7 @@ func renderHandler(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	if target == "" {
+	if len(targets) == 0 {
 		http.Error(w, "empty target", http.StatusBadRequest)
 		accessLogger.Error("request failed",
 			zap.Int("memory_usage_bytes", memoryUsage),
@@ -337,7 +341,7 @@ func renderHandler(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	metrics, stats, err := config.zipper.Render(ctx, logger, target, int32(from), int32(until))
+	metrics, stats, err := config.zipper.FetchPB(ctx, targets, int32(from), int32(until))
 	sendStats(stats)
 	if err != nil {
 		http.Error(w, "error fetching the data", http.StatusInternalServerError)
@@ -450,15 +454,15 @@ func infoHandler(w http.ResponseWriter, req *http.Request) {
 		)
 		return
 	}
-	target := req.FormValue("target")
+	targets := req.Form["target"]
 	format := req.FormValue("format")
 
 	accessLogger = accessLogger.With(
-		zap.String("target", target),
+		zap.Strings("targets", targets),
 		zap.String("format", format),
 	)
 
-	if target == "" {
+	if len(targets) == 0 {
 		accessLogger.Error("info failed",
 			zap.Int("http_code", http.StatusBadRequest),
 			zap.String("reason", "empty target"),
@@ -468,7 +472,7 @@ func infoHandler(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	infos, stats, err := config.zipper.Info(ctx, logger, target)
+	result, stats, err := config.zipper.InfoPB(ctx, targets)
 	sendStats(stats)
 	if err != nil {
 		accessLogger.Error("info failed",
@@ -484,21 +488,13 @@ func infoHandler(w http.ResponseWriter, req *http.Request) {
 	switch format {
 	case "protobuf", "protobuf3":
 		w.Header().Set("Content-Type", contentTypeProtobuf)
-		var result pb3.ZipperInfoResponse
-		result.Responses = make([]pb3.ServerInfoResponse, len(infos))
-		for s, i := range infos {
-			var r pb3.ServerInfoResponse
-			r.Server = s
-			r.Info = &i
-			result.Responses = append(result.Responses, r)
-		}
 		b, err = result.Marshal()
 		/* #nosec */
 		_, _ = w.Write(b)
 	case "", "json":
 		w.Header().Set("Content-Type", contentTypeJSON)
 		jEnc := json.NewEncoder(w)
-		err = jEnc.Encode(infos)
+		err = jEnc.Encode(result)
 	}
 	if err != nil {
 		http.Error(w, "error marshaling data", http.StatusInternalServerError)
@@ -635,7 +631,12 @@ func main() {
 	Metrics.SearchCacheItems = expvar.Func(func() interface{} { return zipperConfig.SearchCache.ECItems() })
 	expvar.Publish("searchCacheItems", Metrics.SearchCacheItems)
 
-	config.zipper = zipper.NewZipper(sendStats, zipperConfig, zapwriter.Logger("zipper"))
+	config.zipper, err = zipper.NewZipper(sendStats, zipperConfig, zapwriter.Logger("zipper"))
+	if err != nil {
+		logger.Fatal("failed to create zipper instance",
+			zap.Error(err),
+		)
+	}
 
 	http.HandleFunc("/metrics/find/", httputil.TrackConnections(httputil.TimeHandler(cu.ParseCtx(findHandler), bucketRequestTimes)))
 	http.HandleFunc("/render/", httputil.TrackConnections(httputil.TimeHandler(cu.ParseCtx(renderHandler), bucketRequestTimes)))
@@ -713,6 +714,22 @@ func main() {
 		if err != nil {
 			log.Fatalln("error during pidfile.Write():", err)
 		}
+	}
+
+	if len(config.GRPCListen) > 0 {
+		config.zipper, err = zipper.NewZipper(sendStats, zipperConfig, zapwriter.Logger("zipper"))
+		if err != nil {
+			logger.Fatal("failed to initialize zipper",
+				zap.Error(err),
+			)
+		}
+		srv, err := NewGRPCServer(config.GRPCListen)
+		if err != nil {
+			logger.Fatal("failed to start gRPC server",
+				zap.Error(err),
+			)
+		}
+		go srv.serve()
 	}
 
 	err = gracehttp.Serve(&http.Server{
