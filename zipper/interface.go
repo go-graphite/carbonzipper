@@ -2,6 +2,7 @@ package zipper
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -71,9 +72,9 @@ func (m *LBMethod) UnmarshalJSON(data []byte) error {
 func (m LBMethod) MarshalJSON() ([]byte, error) {
 	switch m {
 	case RoundRobinLB:
-		return []byte("RoundRobin"), nil
+		return json.Marshal("RoundRobin")
 	case BroadcastLB:
-		return []byte("Broadcast"), nil
+		return json.Marshal("Broadcast")
 	}
 
 	return nil, ErrUnknownLBMethod
@@ -105,9 +106,9 @@ func (m *Protocol) UnmarshalJSON(data []byte) error {
 func (m Protocol) MarshalJSON() ([]byte, error) {
 	switch m {
 	case Protobuf:
-		return []byte("protobuf"), nil
+		return json.Marshal("protobuf")
 	case GRPC:
-		return []byte("grpc"), nil
+		return json.Marshal("grpc")
 	}
 
 	return nil, ErrUnknownProtocol

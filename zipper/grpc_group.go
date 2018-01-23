@@ -6,7 +6,6 @@ import (
 
 	pbgrpc "github.com/go-graphite/carbonzipper/carbonzippergrpcpb"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/balancer"
 	_ "google.golang.org/grpc/balancer/roundrobin"
 	"google.golang.org/grpc/resolver"
 	"google.golang.org/grpc/resolver/manual"
@@ -39,9 +38,9 @@ func NewClientGRPCGroup(groupName string, servers []string) (*ClientGRPCGroup, e
 		grpc.WithUserAgent("carbonzipper"),
 		grpc.WithCompressor(grpc.NewGZIPCompressor()),
 		grpc.WithDecompressor(grpc.NewGZIPDecompressor()),
-		grpc.WithBalancerBuilder(balancer.Get("roundrobin")), // TODO: Make that configurable
-		grpc.WithMaxMsgSize(math.MaxUint32),                  // TODO: make that configurable
-		grpc.WithInsecure(),                                  // TODO: Make configurable
+		grpc.WithBalancerName("roundrobin"), // TODO: Make that configurable
+		grpc.WithMaxMsgSize(math.MaxUint32), // TODO: make that configurable
+		grpc.WithInsecure(),                 // TODO: Make configurable
 	}
 
 	conn, err := grpc.Dial(r.Scheme()+":///server", opts...)
