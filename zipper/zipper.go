@@ -73,11 +73,10 @@ func NewZipper(sender func(*Stats), config *Config, logger *zap.Logger) (*Zipper
 	storeBackends := BroadcastGroup{groupName: "root"}
 	if config.Backends != nil && len(config.Backends) != 0 {
 		for _, backend := range config.Backends {
-			client := ClientProtobufGroup{
-				groupName: backend,
-				servers:   []string{backend},
+			client, err := NewClientProtobufGroup(backend, []string{backend}, config.ConcurrencyLimitPerServer, config.MaxIdleConnsPerHost, config.Timeouts.Connect, config.KeepAliveInterval)
+			if err != nil {
+				return nil, err
 			}
-
 			storeBackends.clients = append(storeBackends.clients, client)
 		}
 	} else {

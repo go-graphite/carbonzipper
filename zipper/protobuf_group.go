@@ -59,26 +59,9 @@ func NewClientProtobufGroupWithLimiter(groupName string, servers []string, limit
 }
 
 func NewClientProtobufGroup(groupName string, servers []string, concurencyLimit, maxIdleConns int, connectTimeout, keepAliveInterval time.Duration) (*ClientProtobufGroup, error) {
-	httpClient := &http.Client{
-		Transport: &http.Transport{
-			MaxIdleConnsPerHost: maxIdleConns,
-			DialContext: (&net.Dialer{
-				Timeout:   connectTimeout,
-				KeepAlive: keepAliveInterval,
-				DualStack: true,
-			}).DialContext,
-		},
-	}
+	limiter := limiter.NewServerLimiter(servers, concurencyLimit)
 
-	c := &ClientProtobufGroup{
-		groupName: groupName,
-		servers:   servers,
-
-		client:  httpClient,
-		limiter: limiter.NewServerLimiter(servers, concurencyLimit),
-		logger:  zapwriter.Logger("protobufGroup").With(zap.String("name", groupName)),
-	}
-	return c, nil
+	return NewClientProtobufGroupWithLimiter(groupName, servers, limiter, maxIdleConns, connectTimeout, keepAliveInterval)
 }
 
 func (c ClientProtobufGroup) pickServer() string {

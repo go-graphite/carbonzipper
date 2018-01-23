@@ -126,6 +126,10 @@ func (c BroadcastGroup) ProbeTLDs(ctx context.Context) ([]string, error) {
 	var tlds []string
 	var cache map[string][]string
 	for _, client := range c.clients {
+		logger.Debug("probeTLD",
+			zap.Any("client", client),
+			zap.Any("clients", c.clients),
+		)
 		res, err := client.ProbeTLDs(ctx)
 		if err != nil {
 			logger.Error("failed to probe tld",
