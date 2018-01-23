@@ -22,6 +22,10 @@
 
 
 [[constraint]]
+  name = "github.com/apex/log"
+  version = "1.0.0"
+
+[[constraint]]
   branch = "master"
   name = "github.com/bradfitz/gomemcache"
 
@@ -35,15 +39,71 @@
 
 [[constraint]]
   branch = "master"
+  name = "github.com/facebookgo/atomicfile"
+
+[[constraint]]
+  branch = "master"
+  name = "github.com/facebookgo/clock"
+
+[[constraint]]
+  branch = "master"
+  name = "github.com/facebookgo/ensure"
+
+[[constraint]]
+  branch = "master"
+  name = "github.com/facebookgo/freeport"
+
+[[constraint]]
+  branch = "master"
   name = "github.com/facebookgo/grace"
+
+[[constraint]]
+  branch = "master"
+  name = "github.com/facebookgo/httpdown"
 
 [[constraint]]
   branch = "master"
   name = "github.com/facebookgo/pidfile"
 
 [[constraint]]
+  branch = "master"
+  name = "github.com/facebookgo/stats"
+
+[[constraint]]
+  branch = "master"
+  name = "github.com/fastly/go-utils"
+
+[[constraint]]
+  name = "github.com/go-kit/kit"
+  version = "0.6.0"
+
+[[constraint]]
   name = "github.com/gogo/protobuf"
-  version = "0.4.0"
+  version = "0.5.0"
+
+[[constraint]]
+  branch = "master"
+  name = "github.com/golang/glog"
+
+[[constraint]]
+  name = "github.com/golang/mock"
+  version = "1.0.0"
+
+[[constraint]]
+  branch = "master"
+  name = "github.com/golang/protobuf"
+
+[[constraint]]
+  branch = "master"
+  name = "github.com/jehiah/go-strftime"
+
+[[constraint]]
+  name = "github.com/jonboulle/clockwork"
+  version = "0.1.0"
+
+[[constraint]]
+  branch = "master"
+  name = "github.com/lestrrat/go-envload"
 
 [[constraint]]
   name = "github.com/lestrrat/go-file-rotatelogs"
@@ -66,12 +126,92 @@
   name = "github.com/peterbourgon/g2g"
 
 [[constraint]]
+  name = "github.com/pkg/errors"
+  version = "0.8.0"
+
+[[constraint]]
+  name = "github.com/rs/zerolog"
+  version = "1.3.0"
+
+[[constraint]]
   name = "github.com/satori/go.uuid"
   version = "1.1.0"
 
 [[constraint]]
+  name = "github.com/sirupsen/logrus"
+  version = "1.0.3"
+
+[[constraint]]
+  name = "github.com/stretchr/testify"
+  version = "1.1.4"
+
+[[constraint]]
+  name = "github.com/tebeka/strftime"
+  version = "0.1.2"
+
+[[constraint]]
+  branch = "master"
+  name = "go.pedge.io/lion"
+
+[[constraint]]
+  name = "go.uber.org/atomic"
+  version = "1.2.0"
+
+[[constraint]]
+  name = "go.uber.org/multierr"
+  version = "1.1.0"
+
+[[constraint]]
   name = "go.uber.org/zap"
-  version = "1.5.0"
+  version = "1.7.1"
+
+[[constraint]]
+  branch = "master"
+  name = "go4.org"
+
+[[constraint]]
+  branch = "master"
+  name = "golang.org/x/crypto"
+
+[[constraint]]
+  branch = "master"
+  name = "golang.org/x/net"
+
+[[constraint]]
+  branch = "master"
+  name = "golang.org/x/oauth2"
+
+[[constraint]]
+  branch = "master"
+  name = "golang.org/x/sync"
+
+[[constraint]]
+  branch = "master"
+  name = "golang.org/x/text"
+
+[[constraint]]
+  branch = "master"
+  name = "golang.org/x/tools"
+
+[[constraint]]
+  branch = "master"
+  name = "google.golang.org/api"
+
+[[constraint]]
+  branch = "master"
+  name = "google.golang.org/genproto"
+
+[[constraint]]
+  name = "google.golang.org/grpc"
+  version = "1.7.1"
+
+[[constraint]]
+  branch = "v1"
+  name = "gopkg.in/check.v1"
+
+[[constraint]]
+  name = "gopkg.in/inconshreveable/log15.v2"
+  version = "2.13.0"
 
 [[constraint]]
   branch = "v2"
