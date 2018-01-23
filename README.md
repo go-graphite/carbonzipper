@@ -36,7 +36,7 @@ from FOSDEM '17 or [Graphite@Scale or How to Store Millions of metrics per Secon
 Requirements
 ------------
 
-carbonzipper requires Go 1.8+ to build. It's recommended to always use latest stable.
+carbonzipper requires Go 1.9+ to build. It's recommended to always use latest stable.
 
 CarbonZipper uses protobuf-based protocol to talk with underlying storages. For current version the compatibility list is:
 
