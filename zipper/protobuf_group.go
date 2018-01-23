@@ -2,16 +2,17 @@ package zipper
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io/ioutil"
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"sync/atomic"
 	"time"
 
 	pbgrpc "github.com/go-graphite/carbonzipper/carbonzippergrpcpb"
+	pb3 "github.com/go-graphite/carbonzipper/carbonzipperpb3"
 	"github.com/go-graphite/carbonzipper/limiter"
 	cu "github.com/go-graphite/carbonzipper/util/apictx"
 	util "github.com/go-graphite/carbonzipper/util/zipperctx"
@@ -88,15 +89,6 @@ func (c ClientProtobufGroup) pickServer() string {
 	return c.servers[int(counter%uint64(len(c.servers)))]
 }
 
-func (c ClientProtobufGroup) Name() string {
-	return c.groupName
-}
-
-func (c ClientProtobufGroup) Fetch(ctx context.Context, request *pbgrpc.MultiFetchRequest) (*pbgrpc.MultiFetchResponse, *Stats, error) {
-
-	return nil, nil, nil
-}
-
 type serverResponse struct {
 	server   string
 	response []byte
@@ -169,48 +161,118 @@ func (c ClientProtobufGroup) doQuery(ctx context.Context, uri string) (*serverRe
 	return nil, err
 }
 
-var errNotImplementedYet = errors.New("this feature is not implemented yet")
+func (c ClientProtobufGroup) Name() string {
+	return c.groupName
+}
+
+func (c ClientProtobufGroup) Fetch(ctx context.Context, request *pbgrpc.MultiFetchRequest) (*pbgrpc.MultiFetchResponse, *Stats, error) {
+	stats := &Stats{}
+	rewrite, _ := url.Parse("http://127.0.0.1/render/")
+
+	var targets []string
+	for _, m := range request.Metrics {
+		targets = append(targets, m.Name)
+	}
+
+	v := url.Values{
+		"target": targets,
+		"format": []string{"protobuf"},
+		"from":   []string{strconv.Itoa(int(request.Metrics[0].StartTime))},
+		"until":  []string{strconv.Itoa(int(request.Metrics[0].StopTime))},
+	}
+	rewrite.RawQuery = v.Encode()
+	res, err := c.doQuery(ctx, rewrite.RequestURI())
+	if err != nil {
+		return nil, stats, err
+	}
+
+	var metrics pb3.MultiFetchResponse
+	err = metrics.Unmarshal(res.response)
+	if err != nil {
+		return nil, stats, err
+	}
+
+	stats.Servers = append(stats.Servers, res.server)
+
+	var r pbgrpc.MultiFetchResponse
+	for _, m := range metrics.Metrics {
+		r.Metrics = append(r.Metrics, pbgrpc.FetchResponse{
+			Name:      m.Name,
+			StopTime:  uint32(m.StopTime),
+			StartTime: uint32(m.StartTime),
+			Values:    m.Values,
+			Metadata: &pbgrpc.MetricMetadata{
+				StepTime:            uint32(m.StepTime),
+				AggregationFunction: "avg",
+			},
+		})
+	}
+
+	return &r, stats, nil
+}
 
 func (c ClientProtobufGroup) Find(ctx context.Context, request *pbgrpc.MultiGlobRequest) (*pbgrpc.MultiGlobResponse, *Stats, error) {
-	server := c.pickServer()
-	logger := c.logger.With(zap.String("server", server))
+	stats := &Stats{}
+	rewrite, _ := url.Parse("http://127.0.0.1/metrics/find/")
 
-	logger.Error("not implemented yet",
-		zap.Error(errNotImplementedYet),
-	)
+	var r pbgrpc.MultiGlobResponse
+	var errors []error
+	for _, query := range request.Metrics {
+		v := url.Values{
+			"query":  []string{query},
+			"format": []string{"protobuf"},
+		}
+		rewrite.RawQuery = v.Encode()
+		res, err := c.doQuery(ctx, rewrite.RequestURI())
+		if err != nil {
+			errors = append(errors, err)
+			continue
+		}
+		var globs pb3.GlobResponse
+		err = globs.Unmarshal(res.response)
+		if err != nil {
+			errors = append(errors, err)
+			continue
+		}
+		stats.Servers = append(stats.Servers, res.server)
+		matches := make([]pbgrpc.GlobMatch, 0, len(globs.Matches))
+		for _, m := range globs.Matches {
+			matches = append(matches, pbgrpc.GlobMatch{
+				Path:   m.Path,
+				IsLeaf: m.IsLeaf,
+			})
+		}
+		r.Metrics[query] = pbgrpc.GlobResponse{
+			Name:    globs.Name,
+			Matches: matches,
+		}
+	}
 
-	return nil, nil, errNotImplementedYet
+	if len(errors) != 0 {
+		strErrors := make([]string, 0, len(errors))
+		for _, e := range errors {
+			strErrors = append(strErrors, e.Error())
+		}
+		c.logger.Error("errors occurred while getting results",
+			zap.Strings("errors", strErrors),
+		)
+	}
+
+	if len(r.Metrics) == 0 {
+		return nil, stats, ErrNoResponseFetched
+	}
+	return &r, stats, nil
 }
+
 func (c ClientProtobufGroup) Info(ctx context.Context, request *pbgrpc.MultiMetricsInfoRequest) (*pbgrpc.MultiMetricsInfoResponse, *Stats, error) {
-	server := c.pickServer()
-	logger := c.logger.With(zap.String("server", server))
-
-	logger.Error("not implemented yet",
-		zap.Error(errNotImplementedYet),
-	)
-
-	return nil, nil, errNotImplementedYet
+	return nil, nil, ErrNotImplementedYet
 }
 
 func (c ClientProtobufGroup) List(ctx context.Context, servers []string) (*pbgrpc.ListMetricsResponse, *Stats, error) {
-	server := c.pickServer()
-	logger := c.logger.With(zap.String("server", server))
-
-	logger.Error("not implemented yet",
-		zap.Error(errNotImplementedYet),
-	)
-
-	return nil, nil, errNotImplementedYet
+	return nil, nil, ErrNotImplementedYet
 }
 func (c ClientProtobufGroup) Stats(ctx context.Context, servers []string) (*pbgrpc.MetricDetailsResponse, *Stats, error) {
-	server := c.pickServer()
-	logger := c.logger.With(zap.String("server", server))
-
-	logger.Error("not implemented yet",
-		zap.Error(errNotImplementedYet),
-	)
-
-	return nil, nil, errNotImplementedYet
+	return nil, nil, ErrNotImplementedYet
 }
 
 func (c ClientProtobufGroup) ProbeTLDs(ctx context.Context) ([]string, error) {
@@ -222,8 +284,10 @@ func (c ClientProtobufGroup) ProbeTLDs(ctx context.Context) ([]string, error) {
 		return nil, err
 	}
 	var tlds []string
-	for _, v := range res.Metrics {
-		tlds = append(tlds, v.Path)
+	for _, m := range res.Metrics {
+		for _, v := range m.Matches {
+			tlds = append(tlds, v.Path)
+		}
 	}
 	return tlds, nil
 }

@@ -250,7 +250,7 @@ func TestMergeValues(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			err := mergeValues(&test.m1, &test.m2)
+			err := mergeFetchResponses(&test.m1, &test.m2)
 			if err != test.expectedError {
 				t.Fatalf("unexpected error: '%v'", err)
 			}

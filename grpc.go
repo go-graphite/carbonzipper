@@ -61,31 +61,16 @@ func (srv GRPCServer) FetchMetrics(ctx context.Context, in *pb.MultiFetchRequest
 
 	Metrics.RenderRequests.Add(1)
 
-	var response pb.MultiFetchResponse
-	for _, request := range in.Metrics {
-		if request.Name == "" {
-			grpcLogger.Error("request contains malformed data",
-				zap.Int("memory_usage_bytes", memoryUsage),
-				zap.String("target", request.Name),
-				zap.Error(errEmptyRequest),
-				zap.Duration("runtime_seconds", time.Since(t0)),
-			)
-			continue
-		}
-
-		metrics, stats, err := config.zipper.FetchGRPC(ctx, []string{request.Name}, int32(request.StartTime), int32(request.StopTime))
-		sendStats(stats)
-		if err != nil {
-			grpcLogger.Error("failed to fetch data",
-				zap.Int("memory_usage_bytes", memoryUsage),
-				zap.Error(err),
-				zap.String("target", request.Name),
-				zap.Duration("runtime_seconds", time.Since(t0)),
-			)
-			continue
-		}
-
-		response.Metrics = append(response.Metrics, metrics.Metrics...)
+	response, stats, err := config.zipper.FetchGRPC(ctx, in)
+	sendStats(stats)
+	if err != nil {
+		grpcLogger.Error("failed to fetch data",
+			zap.Int("memory_usage_bytes", memoryUsage),
+			zap.Error(err),
+			zap.Any("request", in),
+			zap.Duration("runtime_seconds", time.Since(t0)),
+		)
+		return nil, err
 	}
 
 	if len(response.Metrics) == 0 {
@@ -97,7 +82,7 @@ func (srv GRPCServer) FetchMetrics(ctx context.Context, in *pb.MultiFetchRequest
 		zap.Duration("runtime_seconds", time.Since(t0)),
 	)
 
-	return &response, nil
+	return response, nil
 }
 
 func (srv GRPCServer) FindMetrics(ctx context.Context, in *pb.MultiGlobRequest) (*pb.MultiGlobResponse, error) {
@@ -119,20 +104,15 @@ func (srv GRPCServer) FindMetrics(ctx context.Context, in *pb.MultiGlobRequest) 
 	ctx, cancel := context.WithTimeout(ctx, config.Timeouts.Find)
 	defer cancel()
 
-	var response pb.MultiGlobResponse
-	for _, originalQuery := range in.Metrics {
-		metrics, stats, err := config.zipper.FindGRPC(ctx, []string{originalQuery})
-		sendStats(stats)
-		if err != nil {
-			grpcLogger.Error("find error",
-				zap.String("query", originalQuery),
-				zap.String("reason", err.Error()),
-				zap.Duration("runtime_seconds", time.Since(t0)),
-			)
-			continue
-		}
-
-		response.Metrics[metrics.Name] = metrics.Matches
+	response, stats, err := config.zipper.FindGRPC(ctx, in)
+	sendStats(stats)
+	if err != nil {
+		grpcLogger.Error("find error",
+			zap.Strings("query", in.Metrics),
+			zap.String("reason", err.Error()),
+			zap.Duration("runtime_seconds", time.Since(t0)),
+		)
+		return nil, err
 	}
 
 	if len(response.Metrics) == 0 {
@@ -142,7 +122,7 @@ func (srv GRPCServer) FindMetrics(ctx context.Context, in *pb.MultiGlobRequest) 
 		zap.Duration("runtime_seconds", time.Since(t0)),
 	)
 
-	return &response, nil
+	return response, nil
 }
 
 func (srv GRPCServer) MetricsInfo(ctx context.Context, in *pb.MultiMetricsInfoRequest) (*pb.MultiMetricsInfoResponse, error) {

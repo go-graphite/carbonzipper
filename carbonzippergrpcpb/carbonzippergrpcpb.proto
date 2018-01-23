@@ -19,7 +19,7 @@ message ProtocolVersionResponse {
     int64 version = 1;
 }
 
-message filteringFunction {
+message FilteringFunction {
     string name = 1;
     repeated string arguments = 2;
 }
@@ -29,7 +29,7 @@ message FetchRequest {
     string name = 1;
     uint32 startTime = 2;
     uint32 stopTime = 3;
-    repeated filteringFunction filterFunctions = 4;
+    repeated FilteringFunction filterFunctions = 4;
 }
 
 message MultiFetchRequest {

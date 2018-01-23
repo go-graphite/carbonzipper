@@ -189,8 +189,8 @@ type Fetcher interface {
 	StatsPB(ctx context.Context) (*pb3.MetricDetailsResponse, *Stats, error)
 
 	// GRPC-compatible methods
-	FetchGRPC(ctx context.Context, query []string, startTime, stopTime int32) (*pbgrpc.MultiFetchResponse, *Stats, error)
-	FindGRPC(ctx context.Context, query []string) (*pbgrpc.GlobResponse, *Stats, error)
+	FetchGRPC(ctx context.Context, request *pbgrpc.MultiFetchRequest) (*pbgrpc.MultiFetchResponse, *Stats, error)
+	FindGRPC(ctx context.Context, request *pbgrpc.MultiGlobRequest) ([]*pbgrpc.MultiGlobResponse, *Stats, error)
 
 	InfoGRPC(ctx context.Context) (*pbgrpc.ZipperInfoResponse, *Stats, error)
 	ListGRPC(ctx context.Context) (*pbgrpc.ListMetricsResponse, *Stats, error)

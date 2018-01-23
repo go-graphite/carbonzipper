@@ -5,7 +5,6 @@ import (
 	"math"
 
 	pbgrpc "github.com/go-graphite/carbonzipper/carbonzippergrpcpb"
-	"github.com/golang/protobuf/ptypes/empty"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/balancer"
 	_ "google.golang.org/grpc/balancer/roundrobin"
@@ -25,8 +24,6 @@ type ClientGRPCGroup struct {
 
 	client pbgrpc.CarbonV1Client
 }
-
-var emptyMsg = &empty.Empty{}
 
 func NewClientGRPCGroup(groupName string, servers []string) (*ClientGRPCGroup, error) {
 	// TODO: Implement normal resolver
@@ -157,8 +154,10 @@ func (c ClientGRPCGroup) ProbeTLDs(ctx context.Context) ([]string, error) {
 		return nil, err
 	}
 	var tlds []string
-	for _, v := range res.Metrics {
-		tlds = append(tlds, v.Path)
+	for _, m := range res.Metrics {
+		for _, v := range m.Matches {
+			tlds = append(tlds, v.Path)
+		}
 	}
 	return tlds, nil
 }
