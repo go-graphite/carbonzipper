@@ -9,6 +9,9 @@ import (
 	_ "google.golang.org/grpc/balancer/roundrobin"
 	"google.golang.org/grpc/resolver"
 	"google.golang.org/grpc/resolver/manual"
+
+	"github.com/lomik/zapwriter"
+	"go.uber.org/zap"
 )
 
 // RoundRobin is used to connect to backends inside clientGRPCGroups, implements ServerClient interface
@@ -20,7 +23,7 @@ type ClientGRPCGroup struct {
 	conn     *grpc.ClientConn
 	dialerrc chan error
 	cleanup  func()
-	timeout Timeouts
+	timeout  Timeouts
 
 	client pbgrpc.CarbonV1Client
 }
@@ -157,12 +160,19 @@ func (c ClientGRPCGroup) Stats(ctx context.Context) (*pbgrpc.MetricDetailsRespon
 }
 
 func (c ClientGRPCGroup) ProbeTLDs(ctx context.Context) ([]string, error) {
+	logger := zapwriter.Logger("probe").With(zap.String("groupName", c.groupName))
+
 	ctx, cancel := context.WithTimeout(ctx, c.timeout.Find)
 	defer cancel()
 
 	req := &pbgrpc.MultiGlobRequest{
 		Metrics: []string{"*"},
 	}
+
+	logger.Debug("doing request",
+		zap.Any("request", req),
+	)
+
 	res, _, err := c.Find(ctx, req)
 	if err != nil {
 		return nil, err

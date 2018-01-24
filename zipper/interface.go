@@ -47,7 +47,7 @@ func (s *Stats) Merge(stats *Stats) {
 	s.FailedServers = append(s.FailedServers, stats.FailedServers...)
 }
 
-var ErrUnknownLBMethod = fmt.Errorf("unknown lb method")
+var ErrUnknownLBMethodFmt = "unknown lb method: '%v', supported: %v"
 
 type LBMethod int
 
@@ -56,17 +56,43 @@ const (
 	BroadcastLB
 )
 
-func (m *LBMethod) UnmarshalJSON(data []byte) error {
-	method := strings.ToLower(string(data))
-	switch method {
-	case "roundrobin", "rr":
-		*m = RoundRobinLB
-	case "broadcast", "all":
-		*m = BroadcastLB
-	default:
-		return ErrUnknownLBMethod
+func (p LBMethod) keys(m map[string]LBMethod) []string {
+	res := make([]string, 0)
+	for k := range m {
+		res = append(res, k)
+	}
+	return res
+}
+
+var supportedLBMethods = map[string]LBMethod{
+	"roundrobin": RoundRobinLB,
+	"rr":         RoundRobinLB,
+	"any":        RoundRobinLB,
+	"broadcast":  BroadcastLB,
+	"all":        BroadcastLB,
+}
+
+func (m *LBMethod) FromString(method string) error {
+	var ok bool
+	if *m, ok = supportedLBMethods[strings.ToLower(method)]; !ok {
+		return fmt.Errorf(ErrUnknownLBMethodFmt, method, m.keys(supportedLBMethods))
 	}
 	return nil
+}
+
+func (m *LBMethod) UnmarshalJSON(data []byte) error {
+	method := strings.ToLower(string(data))
+	return m.FromString(method)
+}
+
+func (m *LBMethod) UnmarshalYAML(unmarshal func(interface{}) error) error {
+	var method string
+	err := unmarshal(&method)
+	if err != nil {
+		return err
+	}
+
+	return m.FromString(method)
 }
 
 func (m LBMethod) MarshalJSON() ([]byte, error) {
@@ -77,30 +103,56 @@ func (m LBMethod) MarshalJSON() ([]byte, error) {
 		return json.Marshal("Broadcast")
 	}
 
-	return nil, ErrUnknownLBMethod
+	return nil, fmt.Errorf(ErrUnknownLBMethodFmt, m, m.keys(supportedLBMethods))
 }
 
 // Protocol defines protocol
 type Protocol int
 
-var ErrUnknownProtocol = fmt.Errorf("unknown protocol")
+var ErrUnknownProtocolFmt = "unknown protocol: '%v', supported: %v"
 
 const (
 	Protobuf Protocol = iota
 	GRPC
 )
 
-func (m *Protocol) UnmarshalJSON(data []byte) error {
-	method := strings.ToLower(string(data))
-	switch method {
-	case "protobuf", "pb", "pb3":
-		*m = Protobuf
-	case "grpc":
-		*m = GRPC
-	default:
-		return ErrUnknownProtocol
+var supportedProtocols = map[string]Protocol{
+	"protobuf": Protobuf,
+	"pb":       Protobuf,
+	"pb3":      Protobuf,
+	"grpc":     GRPC,
+}
+
+func (p Protocol) keys(m map[string]Protocol) []string {
+	res := make([]string, 0)
+	for k := range m {
+		res = append(res, k)
+	}
+	return res
+}
+
+func (m *Protocol) FromString(method string) error {
+	var ok bool
+	if *m, ok = supportedProtocols[strings.ToLower(method)]; !ok {
+		return fmt.Errorf(ErrUnknownProtocolFmt, method, m.keys(supportedProtocols))
 	}
 	return nil
+}
+
+func (m *Protocol) UnmarshalYAML(unmarshal func(interface{}) error) error {
+	var method string
+	err := unmarshal(&method)
+	if err != nil {
+		return err
+	}
+
+	return m.FromString(method)
+}
+
+func (m *Protocol) UnmarshalJSON(data []byte) error {
+	method := strings.ToLower(string(data))
+
+	return m.FromString(method)
 }
 
 func (m Protocol) MarshalJSON() ([]byte, error) {
@@ -111,20 +163,16 @@ func (m Protocol) MarshalJSON() ([]byte, error) {
 		return json.Marshal("grpc")
 	}
 
-	return nil, ErrUnknownProtocol
-}
-
-type ServerGroup struct {
-	LBMethod LBMethod `yaml:"lbMethod"` // Valid: rr/roundrobin, broadcast/all
-	Servers  []string `yaml:"servers"`
-	Timeouts          *Timeouts
-	ConcurrencyLimit  *int
+	return nil, fmt.Errorf(ErrUnknownProtocolFmt, m, m.keys(supportedProtocols))
 }
 
 type BackendV2 struct {
-	GroupName string   `yaml:"groupName"`
-	Protocol  Protocol `yaml:"backendProtocol"`
-	ServerGroup
+	GroupName        string    `yaml:"groupName"`
+	Protocol         Protocol  `yaml:"backendProtocol"`
+	LBMethod         LBMethod  `yaml:"lbMethod"` // Valid: rr/roundrobin, broadcast/all
+	Servers          []string  `yaml:"servers"`
+	Timeouts         *Timeouts `yaml:"timeouts"`
+	ConcurrencyLimit *int      `yamp:"concurrencyLimit"`
 }
 
 // Timeouts is a global structure that contains configuration for zipper Timeouts

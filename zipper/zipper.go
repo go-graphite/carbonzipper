@@ -110,8 +110,13 @@ func NewZipper(sender func(*Stats), config *Config, logger *zap.Logger) (*Zipper
 			if backend.ConcurrencyLimit != nil {
 				concurencyLimit = *backend.ConcurrencyLimit
 			}
+			var client ServerClient
+			logger.Debug("creating lb group",
+				zap.String("name", backend.GroupName),
+				zap.Strings("servers", backend.Servers),
+				zap.Any("type", backend.LBMethod),
+			)
 			if backend.LBMethod == RoundRobinLB {
-				var client ServerClient
 				if backend.Protocol == GRPC {
 					client, err = NewClientGRPCGroup(backend.GroupName, backend.Servers, timeouts)
 					if err != nil {
@@ -123,10 +128,9 @@ func NewZipper(sender func(*Stats), config *Config, logger *zap.Logger) (*Zipper
 						return nil, err
 					}
 				}
-				storeClients = append(storeClients, client)
 			} else {
-				for _, server := range backend.ServerGroup.Servers {
-					var client ServerClient
+				backends := make([]ServerClient, 0)
+				for _, server := range backend.Servers {
 					if backend.Protocol == GRPC {
 						client, err = NewClientGRPCGroup(server, []string{server}, timeouts)
 						if err != nil {
@@ -138,10 +142,15 @@ func NewZipper(sender func(*Stats), config *Config, logger *zap.Logger) (*Zipper
 							return nil, err
 						}
 					}
+					backends = append(backends, client)
+				}
 
-					storeClients = append(storeClients, client)
+				client, err = NewBroadcastGroup(backend.GroupName, backends, config.PathCache, concurencyLimit, timeouts)
+				if err != nil {
+					return nil, err
 				}
 			}
+			storeClients = append(storeClients, client)
 		}
 	}
 	storeBackends, err := NewBroadcastGroup("root", storeClients, config.PathCache, config.ConcurrencyLimitPerServer, config.Timeouts)

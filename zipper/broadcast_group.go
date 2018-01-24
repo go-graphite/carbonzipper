@@ -29,8 +29,8 @@ func NewBroadcastGroup(groupName string, servers []ServerClient, pathCache pathc
 	logger.Info("limiter will be created",
 		zap.String("name", groupName),
 		zap.Strings("servrers", srvs),
-			zap.Int("concurency_limit", concurencyLimit),
-		)
+		zap.Int("concurency_limit", concurencyLimit),
+	)
 	limiter := limiter.NewServerLimiter(srvs, concurencyLimit)
 
 	return NewBroadcastGroupWithLimiter(groupName, servers, pathCache, limiter, timeout)
@@ -56,7 +56,7 @@ func (bg BroadcastGroup) Fetch(ctx context.Context, request *pbgrpc.MultiFetchRe
 	ctx, cancel := context.WithTimeout(ctx, bg.timeout.Render)
 	defer cancel()
 	for _, client := range bg.clients {
-		go func() {
+		go func(client ServerClient) {
 			var r ServerFetchResponse
 			err := bg.limiter.Enter(ctx, bg.groupName)
 			if err != nil {
@@ -65,7 +65,7 @@ func (bg BroadcastGroup) Fetch(ctx context.Context, request *pbgrpc.MultiFetchRe
 			r.response, r.stats, r.err = client.Fetch(ctx, request)
 			resCh <- &r
 			bg.limiter.Leave(ctx, bg.groupName)
-		}()
+		}(client)
 	}
 
 	var result ServerFetchResponse
@@ -100,7 +100,7 @@ func (bg BroadcastGroup) Find(ctx context.Context, request *pbgrpc.MultiGlobRequ
 	ctx, cancel := context.WithTimeout(ctx, bg.timeout.Find)
 	defer cancel()
 	for _, client := range bg.clients {
-		go func() {
+		go func(client ServerClient) {
 			logger.Debug("waiting for a slot",
 				zap.String("group_name", bg.groupName),
 				zap.String("client_name", client.Name()),
@@ -117,7 +117,7 @@ func (bg BroadcastGroup) Find(ctx context.Context, request *pbgrpc.MultiGlobRequ
 			resCh <- &r
 			bg.limiter.Leave(ctx, bg.groupName)
 			logger.Debug("got result")
-		}()
+		}(client)
 	}
 
 	var result ServerFindResponse
@@ -165,20 +165,18 @@ func (bg BroadcastGroup) Stats(ctx context.Context) (*pbgrpc.MetricDetailsRespon
 
 type tldResponse struct {
 	server string
-	tlds []string
+	tlds   []string
 }
 
 func (bg BroadcastGroup) ProbeTLDs(ctx context.Context) ([]string, error) {
-	logger := zapwriter.Logger("probe")
+	logger := zapwriter.Logger("probe").With(zap.String("groupName", bg.groupName))
 	var tlds []string
 	cache := make(map[string][]string)
 	resCh := make(chan *tldResponse, len(bg.clients))
 	ctx, cancel := context.WithTimeout(ctx, bg.timeout.Find)
-	logger.Debug("probeTLD",
-		zap.Any("clients", bg.clients),
-	)
+
 	for _, client := range bg.clients {
-		go func() {
+		go func(client ServerClient) {
 			logger.Debug("probeTLD",
 				zap.String("name", client.Name()),
 			)
@@ -194,9 +192,9 @@ func (bg BroadcastGroup) ProbeTLDs(ctx context.Context) ([]string, error) {
 
 			resCh <- &tldResponse{
 				server: client.Name(),
-				tlds: res,
+				tlds:   res,
 			}
-		}()
+		}(client)
 	}
 
 	counter := 0

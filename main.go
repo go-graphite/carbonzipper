@@ -56,12 +56,13 @@ type GraphiteConfig struct {
 
 // config contains necessary information for global
 var config = struct {
-	Backends   []string       `yaml:"backends"`
-	MaxProcs   int            `yaml:"maxProcs"`
-	Graphite   GraphiteConfig `yaml:"graphite"`
-	GRPCListen string         `yaml:"grpcListen"`
-	Listen     string         `yaml:"listen"`
-	Buckets    int            `yaml:"buckets"`
+	Backends   []string           `yaml:"backends"`
+	Backendsv2 []zipper.BackendV2 `yaml:"backendsv2"`
+	MaxProcs   int                `yaml:"maxProcs"`
+	Graphite   GraphiteConfig     `yaml:"graphite"`
+	GRPCListen string             `yaml:"grpcListen"`
+	Listen     string             `yaml:"listen"`
+	Buckets    int                `yaml:"buckets"`
 
 	Timeouts          zipper.Timeouts `yaml:"timeouts"`
 	KeepAliveInterval time.Duration   `yaml:"keepAliveInterval"`
@@ -565,7 +566,7 @@ func main() {
 		)
 	}
 
-	if len(config.Backends) == 0 {
+	if len(config.Backends) == 0 && len(config.Backendsv2) == 0 {
 		logger.Fatal("no Backends loaded -- exiting")
 	}
 
@@ -615,6 +616,7 @@ func main() {
 		ConcurrencyLimitPerServer: config.ConcurrencyLimitPerServer,
 		MaxIdleConnsPerHost:       config.MaxIdleConnsPerHost,
 		Backends:                  config.Backends,
+		BackendsV2:                config.Backendsv2,
 
 		CarbonSearch:      config.CarbonSearch,
 		Timeouts:          config.Timeouts,
@@ -719,12 +721,6 @@ func main() {
 	}
 
 	if len(config.GRPCListen) > 0 {
-		config.zipper, err = zipper.NewZipper(sendStats, zipperConfig, zapwriter.Logger("zipper"))
-		if err != nil {
-			logger.Fatal("failed to initialize zipper",
-				zap.Error(err),
-			)
-		}
 		srv, err := NewGRPCServer(config.GRPCListen)
 		if err != nil {
 			logger.Fatal("failed to start gRPC server",

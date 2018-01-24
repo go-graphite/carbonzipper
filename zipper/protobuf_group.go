@@ -51,7 +51,7 @@ func NewClientProtobufGroupWithLimiter(groupName string, servers []string, limit
 	c := &ClientProtobufGroup{
 		groupName: groupName,
 		servers:   servers,
-		timeout: timeout,
+		timeout:   timeout,
 
 		client:  httpClient,
 		limiter: limiter,
@@ -95,7 +95,7 @@ func (c ClientProtobufGroup) doRequest(ctx context.Context, uri string) (*server
 
 	c.logger.Debug("trying to get slot",
 		zap.String("name", c.groupName),
-			zap.String("uri", u.String()),
+		zap.String("uri", u.String()),
 	)
 
 	err = c.limiter.Enter(ctx, c.groupName)
@@ -126,7 +126,7 @@ func (c ClientProtobufGroup) doRequest(ctx context.Context, uri string) (*server
 	if resp.StatusCode != http.StatusOK {
 		c.logger.Error("status not ok",
 			zap.Int("status_code", resp.StatusCode),
-			)
+		)
 		return nil, fmt.Errorf(ErrFailedToFetchFmt, c.groupName, resp.StatusCode)
 	}
 
@@ -284,9 +284,14 @@ func (c ClientProtobufGroup) Stats(ctx context.Context) (*pbgrpc.MetricDetailsRe
 }
 
 func (c ClientProtobufGroup) ProbeTLDs(ctx context.Context) ([]string, error) {
+	logger := zapwriter.Logger("probe").With(zap.String("groupName", c.groupName))
 	req := &pbgrpc.MultiGlobRequest{
 		Metrics: []string{"*"},
 	}
+
+	logger.Debug("doing request",
+		zap.Any("request", req),
+	)
 
 	res, _, err := c.Find(ctx, req)
 	if err != nil {
