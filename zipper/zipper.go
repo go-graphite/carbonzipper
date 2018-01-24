@@ -30,13 +30,13 @@ type Zipper struct {
 	keepAliveInterval      time.Duration
 
 	searchConfigured bool
-	searchBackends   BroadcastGroup
+	searchBackends   ServerClient
 	searchPrefix     string
 
 	searchCache pathcache.PathCache
 
 	// Will broadcast to all servers there
-	storeBackends             BroadcastGroup
+	storeBackends             ServerClient
 	concurrencyLimitPerServer int
 
 	sendStats func(*Stats)
@@ -49,72 +49,102 @@ type nameLeaf struct {
 	leaf bool
 }
 
+func sanitizeTimouts(timeouts Timeouts) Timeouts {
+	if timeouts.Render == 0 {
+		timeouts.Render = 10000 * time.Second
+	}
+	if timeouts.Find == 0 {
+		timeouts.Find = 10000 * time.Second
+	}
+	if timeouts.AfterStarted == 0 {
+		timeouts.AfterStarted = 2 * time.Second
+	}
+
+	if timeouts.Connect == 0 {
+		timeouts.Connect = 200 * time.Millisecond
+	}
+
+	return timeouts
+}
+
 // NewZipper allows to create new Zipper
 func NewZipper(sender func(*Stats), config *Config, logger *zap.Logger) (*Zipper, error) {
 	var err error
 	prefix := config.CarbonSearch.Prefix
 	var searchClientGroup ServerClient
 
+	config.Timeouts = sanitizeTimouts(config.Timeouts)
+
 	if config.CarbonSearch.Backend != "" {
-		searchClientGroup, err = NewClientProtobufGroup("search", []string{config.CarbonSearch.Backend}, config.ConcurrencyLimitPerServer, config.MaxIdleConnsPerHost, config.Timeouts.Connect, config.KeepAliveInterval)
+		searchClientGroup, err = NewClientProtobufGroup("search", []string{config.CarbonSearch.Backend}, config.ConcurrencyLimitPerServer, config.MaxIdleConnsPerHost, config.Timeouts, config.KeepAliveInterval)
 		if err != nil {
 			return nil, err
 		}
 	} else {
-		searchClientGroup, err = NewClientGRPCGroup("search", config.CarbonSearchV2.Backends)
+		searchClientGroup, err = NewClientGRPCGroup("search", config.CarbonSearchV2.Backends, config.Timeouts)
 		if err != nil {
 			return nil, err
 		}
 		prefix = config.CarbonSearchV2.Prefix
 	}
-	searchBackends := BroadcastGroup{groupName: "search"}
-	searchBackends.clients = append(searchBackends.clients, searchClientGroup)
+	searchClients := []ServerClient{searchClientGroup}
+	// func NewBroadcastGroup(groupName string, servers []ServerClient, pathCache pathcache.PathCache, concurencyLimit int, timeout time.Duration) (*BroadcastGroup, error) {
+	searchBackends, err := NewBroadcastGroup("search", searchClients, config.PathCache, config.ConcurrencyLimitPerServer, config.Timeouts)
 
-	storeBackends := BroadcastGroup{groupName: "root"}
+	storeClients := make([]ServerClient, 0)
 	if config.Backends != nil && len(config.Backends) != 0 {
 		for _, backend := range config.Backends {
-			client, err := NewClientProtobufGroup(backend, []string{backend}, config.ConcurrencyLimitPerServer, config.MaxIdleConnsPerHost, config.Timeouts.Connect, config.KeepAliveInterval)
+			client, err := NewClientProtobufGroup(backend, []string{backend}, config.ConcurrencyLimitPerServer, config.MaxIdleConnsPerHost, config.Timeouts, config.KeepAliveInterval)
 			if err != nil {
 				return nil, err
 			}
-			storeBackends.clients = append(storeBackends.clients, client)
+			storeClients = append(storeClients, client)
 		}
 	} else {
 		for _, backend := range config.BackendsV2 {
+			concurencyLimit := config.ConcurrencyLimitPerServer
+			timeouts := config.Timeouts
+			if backend.Timeouts != nil {
+				timeouts = *backend.Timeouts
+			}
+			if backend.ConcurrencyLimit != nil {
+				concurencyLimit = *backend.ConcurrencyLimit
+			}
 			if backend.LBMethod == RoundRobinLB {
 				var client ServerClient
 				if backend.Protocol == GRPC {
-					client, err = NewClientGRPCGroup(backend.GroupName, backend.Servers)
+					client, err = NewClientGRPCGroup(backend.GroupName, backend.Servers, timeouts)
 					if err != nil {
 						return nil, err
 					}
 				} else {
-					client, err = NewClientProtobufGroup(backend.GroupName, backend.Servers, config.ConcurrencyLimitPerServer, config.MaxIdleConnsPerHost, config.Timeouts.Connect, config.KeepAliveInterval)
+					client, err = NewClientProtobufGroup(backend.GroupName, backend.Servers, concurencyLimit, config.MaxIdleConnsPerHost, timeouts, config.KeepAliveInterval)
 					if err != nil {
 						return nil, err
 					}
 				}
-				storeBackends.clients = append(storeBackends.clients, client)
+				storeClients = append(storeClients, client)
 			} else {
 				for _, server := range backend.ServerGroup.Servers {
 					var client ServerClient
 					if backend.Protocol == GRPC {
-						client, err = NewClientGRPCGroup(server, []string{server})
+						client, err = NewClientGRPCGroup(server, []string{server}, timeouts)
 						if err != nil {
 							return nil, err
 						}
 					} else {
-						client, err = NewClientProtobufGroup(server, []string{server}, config.ConcurrencyLimitPerServer, config.MaxIdleConnsPerHost, config.Timeouts.Connect, config.KeepAliveInterval)
+						client, err = NewClientProtobufGroup(server, []string{server}, concurencyLimit, config.MaxIdleConnsPerHost, timeouts, config.KeepAliveInterval)
 						if err != nil {
 							return nil, err
 						}
 					}
 
-					storeBackends.clients = append(storeBackends.clients, client)
+					storeClients = append(storeClients, client)
 				}
 			}
 		}
 	}
+	storeBackends, err := NewBroadcastGroup("root", storeClients, config.PathCache, config.ConcurrencyLimitPerServer, config.Timeouts)
 
 	z := &Zipper{
 		probeTicker: time.NewTicker(10 * time.Minute),

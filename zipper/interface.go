@@ -117,6 +117,8 @@ func (m Protocol) MarshalJSON() ([]byte, error) {
 type ServerGroup struct {
 	LBMethod LBMethod `yaml:"lbMethod"` // Valid: rr/roundrobin, broadcast/all
 	Servers  []string `yaml:"servers"`
+	Timeouts          *Timeouts
+	ConcurrencyLimit  *int
 }
 
 type BackendV2 struct {

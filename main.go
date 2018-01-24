@@ -88,8 +88,10 @@ var config = struct {
 	Buckets:    10,
 
 	Timeouts: zipper.Timeouts{
+		Global:       10000 * time.Second,
 		Render:       10000 * time.Second,
 		AfterStarted: 2 * time.Second,
+		Find:         10000 * time.Second,
 		Connect:      200 * time.Millisecond,
 	},
 	KeepAliveInterval: 30 * time.Second,
@@ -776,6 +778,9 @@ func bucketRequestTimes(req *http.Request, t time.Duration) {
 }
 
 func sendStats(stats *zipper.Stats) {
+	if stats == nil {
+		return
+	}
 	Metrics.Timeouts.Add(stats.Timeouts)
 	Metrics.FindErrors.Add(stats.FindErrors)
 	Metrics.RenderErrors.Add(stats.RenderErrors)

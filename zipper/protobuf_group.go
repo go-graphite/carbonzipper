@@ -33,14 +33,15 @@ type ClientProtobufGroup struct {
 
 	limiter limiter.ServerLimiter
 	logger  *zap.Logger
+	timeout Timeouts
 }
 
-func NewClientProtobufGroupWithLimiter(groupName string, servers []string, limiter limiter.ServerLimiter, maxIdleConns int, connectTimeout, keepAliveInterval time.Duration) (*ClientProtobufGroup, error) {
+func NewClientProtobufGroupWithLimiter(groupName string, servers []string, limiter limiter.ServerLimiter, maxIdleConns int, timeout Timeouts, keepAliveInterval time.Duration) (*ClientProtobufGroup, error) {
 	httpClient := &http.Client{
 		Transport: &http.Transport{
 			MaxIdleConnsPerHost: maxIdleConns,
 			DialContext: (&net.Dialer{
-				Timeout:   connectTimeout,
+				Timeout:   timeout.Connect,
 				KeepAlive: keepAliveInterval,
 				DualStack: true,
 			}).DialContext,
@@ -50,6 +51,7 @@ func NewClientProtobufGroupWithLimiter(groupName string, servers []string, limit
 	c := &ClientProtobufGroup{
 		groupName: groupName,
 		servers:   servers,
+		timeout: timeout,
 
 		client:  httpClient,
 		limiter: limiter,
@@ -58,10 +60,10 @@ func NewClientProtobufGroupWithLimiter(groupName string, servers []string, limit
 	return c, nil
 }
 
-func NewClientProtobufGroup(groupName string, servers []string, concurencyLimit, maxIdleConns int, connectTimeout, keepAliveInterval time.Duration) (*ClientProtobufGroup, error) {
+func NewClientProtobufGroup(groupName string, servers []string, concurencyLimit, maxIdleConns int, timeout Timeouts, keepAliveInterval time.Duration) (*ClientProtobufGroup, error) {
 	limiter := limiter.NewServerLimiter(servers, concurencyLimit)
 
-	return NewClientProtobufGroupWithLimiter(groupName, servers, limiter, maxIdleConns, connectTimeout, keepAliveInterval)
+	return NewClientProtobufGroupWithLimiter(groupName, servers, limiter, maxIdleConns, timeout, keepAliveInterval)
 }
 
 func (c ClientProtobufGroup) pickServer() string {
@@ -91,25 +93,48 @@ func (c ClientProtobufGroup) doRequest(ctx context.Context, uri string) (*server
 	}
 	req = cu.MarshalCtx(ctx, util.MarshalCtx(ctx, req))
 
-	c.limiter.Enter(c.groupName)
-	defer c.limiter.Leave(server)
+	c.logger.Debug("trying to get slot",
+		zap.String("name", c.groupName),
+			zap.String("uri", u.String()),
+	)
+
+	err = c.limiter.Enter(ctx, c.groupName)
+	if err != nil {
+		c.logger.Debug("timeout waiting for a slot")
+		return nil, err
+	}
+	defer c.limiter.Leave(ctx, server)
+
+	c.logger.Debug("got slot")
 
 	resp, err := c.client.Do(req.WithContext(ctx))
 	if err != nil {
+		c.logger.Error("error fetching result",
+			zap.Error(err),
+		)
 		return nil, err
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusNotFound {
+	if resp.StatusCode == http.StatusNotFound {
+		c.logger.Error("status not ok, not found",
+			zap.Int("status_code", resp.StatusCode),
+		)
 		return nil, ErrNotFound
 	}
 
 	if resp.StatusCode != http.StatusOK {
+		c.logger.Error("status not ok",
+			zap.Int("status_code", resp.StatusCode),
+			)
 		return nil, fmt.Errorf(ErrFailedToFetchFmt, c.groupName, resp.StatusCode)
 	}
 
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
+		c.logger.Error("error reading body",
+			zap.Error(err),
+		)
 		return nil, err
 	}
 
@@ -117,7 +142,6 @@ func (c ClientProtobufGroup) doRequest(ctx context.Context, uri string) (*server
 }
 
 func (c ClientProtobufGroup) doQuery(ctx context.Context, uri string) (*serverResponse, error) {
-	done := false
 	maxTries := 3
 	if len(c.servers) > maxTries {
 		maxTries = len(c.servers)
@@ -125,7 +149,7 @@ func (c ClientProtobufGroup) doQuery(ctx context.Context, uri string) (*serverRe
 	try := 0
 	var res *serverResponse
 	var err error
-	for !done {
+	for {
 		if try > maxTries {
 			break
 		}
@@ -138,7 +162,7 @@ func (c ClientProtobufGroup) doQuery(ctx context.Context, uri string) (*serverRe
 			continue
 		}
 
-		return res, err
+		return res, nil
 	}
 
 	return nil, err
@@ -199,6 +223,7 @@ func (c ClientProtobufGroup) Find(ctx context.Context, request *pbgrpc.MultiGlob
 	rewrite, _ := url.Parse("http://127.0.0.1/metrics/find/")
 
 	var r pbgrpc.MultiGlobResponse
+	r.Metrics = make(map[string]pbgrpc.GlobResponse)
 	var errors []error
 	for _, query := range request.Metrics {
 		v := url.Values{
@@ -262,15 +287,18 @@ func (c ClientProtobufGroup) ProbeTLDs(ctx context.Context) ([]string, error) {
 	req := &pbgrpc.MultiGlobRequest{
 		Metrics: []string{"*"},
 	}
+
 	res, _, err := c.Find(ctx, req)
 	if err != nil {
 		return nil, err
 	}
+
 	var tlds []string
 	for _, m := range res.Metrics {
 		for _, v := range m.Matches {
 			tlds = append(tlds, v.Path)
 		}
 	}
+
 	return tlds, nil
 }

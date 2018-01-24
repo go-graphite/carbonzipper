@@ -20,11 +20,12 @@ type ClientGRPCGroup struct {
 	conn     *grpc.ClientConn
 	dialerrc chan error
 	cleanup  func()
+	timeout Timeouts
 
 	client pbgrpc.CarbonV1Client
 }
 
-func NewClientGRPCGroup(groupName string, servers []string) (*ClientGRPCGroup, error) {
+func NewClientGRPCGroup(groupName string, servers []string, timeout Timeouts) (*ClientGRPCGroup, error) {
 	// TODO: Implement normal resolver
 	r, cleanup := manual.GenerateAndRegisterManualResolver()
 	var resolvedAddrs []resolver.Address
@@ -57,6 +58,7 @@ func NewClientGRPCGroup(groupName string, servers []string) (*ClientGRPCGroup, e
 		cleanup: cleanup,
 		conn:    conn,
 		client:  pbgrpc.NewCarbonV1Client(conn),
+		timeout: timeout,
 	}
 
 	return client, nil
@@ -70,6 +72,8 @@ func (c ClientGRPCGroup) Fetch(ctx context.Context, request *pbgrpc.MultiFetchRe
 	stats := &Stats{
 		Servers: []string{c.Name()},
 	}
+	ctx, cancel := context.WithTimeout(ctx, c.timeout.Render)
+	defer cancel()
 
 	res, err := c.client.FetchMetrics(ctx, request)
 	if err != nil {
@@ -86,6 +90,8 @@ func (c ClientGRPCGroup) Find(ctx context.Context, request *pbgrpc.MultiGlobRequ
 	stats := &Stats{
 		Servers: []string{c.Name()},
 	}
+	ctx, cancel := context.WithTimeout(ctx, c.timeout.Find)
+	defer cancel()
 
 	res, err := c.client.FindMetrics(ctx, request)
 	if err != nil {
@@ -101,6 +107,8 @@ func (c ClientGRPCGroup) Info(ctx context.Context, request *pbgrpc.MultiMetricsI
 	stats := &Stats{
 		Servers: []string{c.Name()},
 	}
+	ctx, cancel := context.WithTimeout(ctx, c.timeout.Render)
+	defer cancel()
 
 	res, err := c.client.MetricsInfo(ctx, request)
 	if err != nil {
@@ -117,6 +125,8 @@ func (c ClientGRPCGroup) List(ctx context.Context) (*pbgrpc.ListMetricsResponse,
 	stats := &Stats{
 		Servers: []string{c.Name()},
 	}
+	ctx, cancel := context.WithTimeout(ctx, c.timeout.Render)
+	defer cancel()
 
 	res, err := c.client.ListMetrics(ctx, emptyMsg)
 	if err != nil {
@@ -132,6 +142,8 @@ func (c ClientGRPCGroup) Stats(ctx context.Context) (*pbgrpc.MetricDetailsRespon
 	stats := &Stats{
 		Servers: []string{c.Name()},
 	}
+	ctx, cancel := context.WithTimeout(ctx, c.timeout.Render)
+	defer cancel()
 
 	res, err := c.client.Stats(ctx, emptyMsg)
 	if err != nil {
@@ -145,6 +157,9 @@ func (c ClientGRPCGroup) Stats(ctx context.Context) (*pbgrpc.MetricDetailsRespon
 }
 
 func (c ClientGRPCGroup) ProbeTLDs(ctx context.Context) ([]string, error) {
+	ctx, cancel := context.WithTimeout(ctx, c.timeout.Find)
+	defer cancel()
+
 	req := &pbgrpc.MultiGlobRequest{
 		Metrics: []string{"*"},
 	}
