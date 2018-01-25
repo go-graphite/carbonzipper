@@ -71,7 +71,7 @@ func (c ClientGRPCGroup) Name() string {
 	return c.groupName
 }
 
-func (c ClientGRPCGroup) Fetch(ctx context.Context, request *pbgrpc.MultiFetchRequest) (*pbgrpc.MultiFetchResponse, *Stats, error) {
+func (c *ClientGRPCGroup) Fetch(ctx context.Context, request *pbgrpc.MultiFetchRequest) (*pbgrpc.MultiFetchResponse, *Stats, error) {
 	stats := &Stats{
 		Servers: []string{c.Name()},
 	}
@@ -89,7 +89,7 @@ func (c ClientGRPCGroup) Fetch(ctx context.Context, request *pbgrpc.MultiFetchRe
 	return res, stats, err
 }
 
-func (c ClientGRPCGroup) Find(ctx context.Context, request *pbgrpc.MultiGlobRequest) (*pbgrpc.MultiGlobResponse, *Stats, error) {
+func (c *ClientGRPCGroup) Find(ctx context.Context, request *pbgrpc.MultiGlobRequest) (*pbgrpc.MultiGlobResponse, *Stats, error) {
 	stats := &Stats{
 		Servers: []string{c.Name()},
 	}
@@ -106,7 +106,7 @@ func (c ClientGRPCGroup) Find(ctx context.Context, request *pbgrpc.MultiGlobRequ
 
 	return res, stats, err
 }
-func (c ClientGRPCGroup) Info(ctx context.Context, request *pbgrpc.MultiMetricsInfoRequest) (*pbgrpc.MultiMetricsInfoResponse, *Stats, error) {
+func (c *ClientGRPCGroup) Info(ctx context.Context, request *pbgrpc.MultiMetricsInfoRequest) (*pbgrpc.MultiMetricsInfoResponse, *Stats, error) {
 	stats := &Stats{
 		Servers: []string{c.Name()},
 	}
@@ -124,7 +124,7 @@ func (c ClientGRPCGroup) Info(ctx context.Context, request *pbgrpc.MultiMetricsI
 	return res, stats, err
 }
 
-func (c ClientGRPCGroup) List(ctx context.Context) (*pbgrpc.ListMetricsResponse, *Stats, error) {
+func (c *ClientGRPCGroup) List(ctx context.Context) (*pbgrpc.ListMetricsResponse, *Stats, error) {
 	stats := &Stats{
 		Servers: []string{c.Name()},
 	}
@@ -141,7 +141,7 @@ func (c ClientGRPCGroup) List(ctx context.Context) (*pbgrpc.ListMetricsResponse,
 
 	return res, stats, err
 }
-func (c ClientGRPCGroup) Stats(ctx context.Context) (*pbgrpc.MetricDetailsResponse, *Stats, error) {
+func (c *ClientGRPCGroup) Stats(ctx context.Context) (*pbgrpc.MetricDetailsResponse, *Stats, error) {
 	stats := &Stats{
 		Servers: []string{c.Name()},
 	}
@@ -159,7 +159,7 @@ func (c ClientGRPCGroup) Stats(ctx context.Context) (*pbgrpc.MetricDetailsRespon
 	return res, stats, err
 }
 
-func (c ClientGRPCGroup) ProbeTLDs(ctx context.Context) ([]string, error) {
+func (c *ClientGRPCGroup) ProbeTLDs(ctx context.Context) ([]string, error) {
 	logger := zapwriter.Logger("probe").With(zap.String("groupName", c.groupName))
 
 	ctx, cancel := context.WithTimeout(ctx, c.timeout.Find)

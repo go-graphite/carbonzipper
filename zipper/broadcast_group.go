@@ -51,7 +51,7 @@ func (bg BroadcastGroup) Name() string {
 	return bg.groupName
 }
 
-func (bg BroadcastGroup) Fetch(ctx context.Context, request *pbgrpc.MultiFetchRequest) (*pbgrpc.MultiFetchResponse, *Stats, error) {
+func (bg *BroadcastGroup) Fetch(ctx context.Context, request *pbgrpc.MultiFetchRequest) (*pbgrpc.MultiFetchResponse, *Stats, error) {
 	resCh := make(chan *ServerFetchResponse, len(bg.clients))
 	ctx, cancel := context.WithTimeout(ctx, bg.timeout.Render)
 	defer cancel()
@@ -94,8 +94,8 @@ func (bg BroadcastGroup) Fetch(ctx context.Context, request *pbgrpc.MultiFetchRe
 	return result.response, result.stats, err
 }
 
-func (bg BroadcastGroup) Find(ctx context.Context, request *pbgrpc.MultiGlobRequest) (*pbgrpc.MultiGlobResponse, *Stats, error) {
-	logger := zapwriter.Logger("broadcastGroup")
+func (bg *BroadcastGroup) Find(ctx context.Context, request *pbgrpc.MultiGlobRequest) (*pbgrpc.MultiGlobResponse, *Stats, error) {
+	logger := zapwriter.Logger("broadcastGroup").With(zap.String("groupName", bg.groupName))
 	resCh := make(chan *ServerFindResponse, len(bg.clients))
 	ctx, cancel := context.WithTimeout(ctx, bg.timeout.Find)
 	defer cancel()
@@ -152,14 +152,14 @@ GATHER:
 	return result.response, result.stats, err
 }
 
-func (bg BroadcastGroup) Info(ctx context.Context, request *pbgrpc.MultiMetricsInfoRequest) (*pbgrpc.MultiMetricsInfoResponse, *Stats, error) {
+func (bg *BroadcastGroup) Info(ctx context.Context, request *pbgrpc.MultiMetricsInfoRequest) (*pbgrpc.MultiMetricsInfoResponse, *Stats, error) {
 	return nil, nil, ErrNotImplementedYet
 }
 
-func (bg BroadcastGroup) List(ctx context.Context) (*pbgrpc.ListMetricsResponse, *Stats, error) {
+func (bg *BroadcastGroup) List(ctx context.Context) (*pbgrpc.ListMetricsResponse, *Stats, error) {
 	return nil, nil, ErrNotImplementedYet
 }
-func (bg BroadcastGroup) Stats(ctx context.Context) (*pbgrpc.MetricDetailsResponse, *Stats, error) {
+func (bg *BroadcastGroup) Stats(ctx context.Context) (*pbgrpc.MetricDetailsResponse, *Stats, error) {
 	return nil, nil, ErrNotImplementedYet
 }
 
@@ -168,7 +168,7 @@ type tldResponse struct {
 	tlds   []string
 }
 
-func (bg BroadcastGroup) ProbeTLDs(ctx context.Context) ([]string, error) {
+func (bg *BroadcastGroup) ProbeTLDs(ctx context.Context) ([]string, error) {
 	logger := zapwriter.Logger("probe").With(zap.String("groupName", bg.groupName))
 	var tlds []string
 	cache := make(map[string][]string)

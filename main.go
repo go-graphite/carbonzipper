@@ -89,11 +89,9 @@ var config = struct {
 	Buckets:    10,
 
 	Timeouts: zipper.Timeouts{
-		Global:       10000 * time.Second,
-		Render:       10000 * time.Second,
-		AfterStarted: 2 * time.Second,
-		Find:         10000 * time.Second,
-		Connect:      200 * time.Millisecond,
+		Render:  10000 * time.Second,
+		Find:    10 * time.Second,
+		Connect: 200 * time.Millisecond,
 	},
 	KeepAliveInterval: 30 * time.Second,
 

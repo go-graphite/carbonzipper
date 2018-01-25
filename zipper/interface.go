@@ -177,11 +177,9 @@ type BackendV2 struct {
 
 // Timeouts is a global structure that contains configuration for zipper Timeouts
 type Timeouts struct {
-	Global       time.Duration `yaml:"global"`
-	Find         time.Duration `yaml:"find"`
-	Render       time.Duration `yaml:"render"`
-	AfterStarted time.Duration `yaml:"afterStarted"`
-	Connect      time.Duration `yaml:"connect"`
+	Find    time.Duration `yaml:"find"`
+	Render  time.Duration `yaml:"render"`
+	Connect time.Duration `yaml:"connect"`
 }
 
 // CarbonSearch is a global structure that contains carbonsearch related configuration bits

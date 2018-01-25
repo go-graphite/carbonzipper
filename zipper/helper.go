@@ -107,6 +107,10 @@ out:
 func (r *ServerFetchResponse) Merge(response *ServerFetchResponse) {
 	r.stats.Merge(response.stats)
 
+	if response.err != nil {
+		return
+	}
+
 	metrics := make(map[string]*pbgrpc.FetchResponse)
 	for i := range response.response.Metrics {
 		metrics[response.response.Metrics[i].Name] = &response.response.Metrics[i]
@@ -120,6 +124,10 @@ func (r *ServerFetchResponse) Merge(response *ServerFetchResponse) {
 				continue
 			}
 		}
+	}
+
+	if r.err != nil && response.err == nil {
+		r.err = nil
 	}
 
 	return
@@ -153,11 +161,18 @@ func mergeFindRequests(f1, f2 []pbgrpc.GlobMatch) []pbgrpc.GlobMatch {
 
 func (r *ServerFindResponse) Merge(response *ServerFindResponse) {
 	r.stats.Merge(response.stats)
+	if response.err != nil {
+		return
+	}
 
 	for k := range response.response.Metrics {
 		if _, ok := r.response.Metrics[k]; !ok {
 			r.response.Metrics[k] = response.response.Metrics[k]
 		}
+	}
+
+	if r.err != nil && response.err == nil {
+		r.err = nil
 	}
 
 	return

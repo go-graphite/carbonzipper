@@ -66,12 +66,22 @@ func NewClientProtobufGroup(groupName string, servers []string, concurencyLimit,
 	return NewClientProtobufGroupWithLimiter(groupName, servers, limiter, maxIdleConns, timeout, keepAliveInterval)
 }
 
-func (c ClientProtobufGroup) pickServer() string {
-	// We don't care about race conditions here
-	counter := atomic.LoadUint64(&c.counter)
-	atomic.AddUint64(&c.counter, 1)
+func (c *ClientProtobufGroup) pickServer() string {
+	if len(c.servers) == 1 {
+		// No need to do heavy operations here
+		return c.servers[0]
+	}
+	logger := zapwriter.Logger("picker").With(zap.String("groupName", c.groupName))
+	counter := atomic.AddUint64(&(c.counter), 1)
+	idx := counter % uint64(len(c.servers))
+	srv := c.servers[int(idx)]
+	logger.Debug("picked",
+		zap.Uint64("counter", counter),
+		zap.Uint64("idx", idx),
+		zap.String("server", srv),
+	)
 
-	return c.servers[int(counter%uint64(len(c.servers)))]
+	return srv
 }
 
 type serverResponse struct {
@@ -79,7 +89,7 @@ type serverResponse struct {
 	response []byte
 }
 
-func (c ClientProtobufGroup) doRequest(ctx context.Context, uri string) (*serverResponse, error) {
+func (c *ClientProtobufGroup) doRequest(ctx context.Context, uri string) (*serverResponse, error) {
 	server := c.pickServer()
 
 	u, err := url.Parse(server + uri)
@@ -141,7 +151,7 @@ func (c ClientProtobufGroup) doRequest(ctx context.Context, uri string) (*server
 	return &serverResponse{server: server, response: body}, nil
 }
 
-func (c ClientProtobufGroup) doQuery(ctx context.Context, uri string) (*serverResponse, error) {
+func (c *ClientProtobufGroup) doQuery(ctx context.Context, uri string) (*serverResponse, error) {
 	maxTries := 3
 	if len(c.servers) > maxTries {
 		maxTries = len(c.servers)
@@ -172,7 +182,7 @@ func (c ClientProtobufGroup) Name() string {
 	return c.groupName
 }
 
-func (c ClientProtobufGroup) Fetch(ctx context.Context, request *pbgrpc.MultiFetchRequest) (*pbgrpc.MultiFetchResponse, *Stats, error) {
+func (c *ClientProtobufGroup) Fetch(ctx context.Context, request *pbgrpc.MultiFetchRequest) (*pbgrpc.MultiFetchResponse, *Stats, error) {
 	stats := &Stats{}
 	rewrite, _ := url.Parse("http://127.0.0.1/render/")
 
@@ -218,7 +228,7 @@ func (c ClientProtobufGroup) Fetch(ctx context.Context, request *pbgrpc.MultiFet
 	return &r, stats, nil
 }
 
-func (c ClientProtobufGroup) Find(ctx context.Context, request *pbgrpc.MultiGlobRequest) (*pbgrpc.MultiGlobResponse, *Stats, error) {
+func (c *ClientProtobufGroup) Find(ctx context.Context, request *pbgrpc.MultiGlobRequest) (*pbgrpc.MultiGlobResponse, *Stats, error) {
 	stats := &Stats{}
 	rewrite, _ := url.Parse("http://127.0.0.1/metrics/find/")
 
@@ -272,18 +282,18 @@ func (c ClientProtobufGroup) Find(ctx context.Context, request *pbgrpc.MultiGlob
 	return &r, stats, nil
 }
 
-func (c ClientProtobufGroup) Info(ctx context.Context, request *pbgrpc.MultiMetricsInfoRequest) (*pbgrpc.MultiMetricsInfoResponse, *Stats, error) {
+func (c *ClientProtobufGroup) Info(ctx context.Context, request *pbgrpc.MultiMetricsInfoRequest) (*pbgrpc.MultiMetricsInfoResponse, *Stats, error) {
 	return nil, nil, ErrNotImplementedYet
 }
 
-func (c ClientProtobufGroup) List(ctx context.Context) (*pbgrpc.ListMetricsResponse, *Stats, error) {
+func (c *ClientProtobufGroup) List(ctx context.Context) (*pbgrpc.ListMetricsResponse, *Stats, error) {
 	return nil, nil, ErrNotImplementedYet
 }
-func (c ClientProtobufGroup) Stats(ctx context.Context) (*pbgrpc.MetricDetailsResponse, *Stats, error) {
+func (c *ClientProtobufGroup) Stats(ctx context.Context) (*pbgrpc.MetricDetailsResponse, *Stats, error) {
 	return nil, nil, ErrNotImplementedYet
 }
 
-func (c ClientProtobufGroup) ProbeTLDs(ctx context.Context) ([]string, error) {
+func (c *ClientProtobufGroup) ProbeTLDs(ctx context.Context) ([]string, error) {
 	logger := zapwriter.Logger("probe").With(zap.String("groupName", c.groupName))
 	req := &pbgrpc.MultiGlobRequest{
 		Metrics: []string{"*"},

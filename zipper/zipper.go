@@ -23,11 +23,10 @@ type Zipper struct {
 	ProbeQuit   chan struct{}
 	ProbeForce  chan int
 
-	timeoutAfterAllStarted time.Duration
-	timeout                time.Duration
-	timeoutConnect         time.Duration
-	timeoutKeepAlive       time.Duration
-	keepAliveInterval      time.Duration
+	timeout           time.Duration
+	timeoutConnect    time.Duration
+	timeoutKeepAlive  time.Duration
+	keepAliveInterval time.Duration
 
 	searchConfigured bool
 	searchBackends   ServerClient
@@ -55,9 +54,6 @@ func sanitizeTimouts(timeouts Timeouts) Timeouts {
 	}
 	if timeouts.Find == 0 {
 		timeouts.Find = 10000 * time.Second
-	}
-	if timeouts.AfterStarted == 0 {
-		timeouts.AfterStarted = 2 * time.Second
 	}
 
 	if timeouts.Connect == 0 {
@@ -170,7 +166,6 @@ func NewZipper(sender func(*Stats), config *Config, logger *zap.Logger) (*Zipper
 		searchConfigured:          len(prefix) > 0 && len(searchBackends.clients) > 0,
 		concurrencyLimitPerServer: config.ConcurrencyLimitPerServer,
 		keepAliveInterval:         config.KeepAliveInterval,
-		timeoutAfterAllStarted:    config.Timeouts.AfterStarted,
 		timeout:                   config.Timeouts.Render,
 		timeoutConnect:            config.Timeouts.Connect,
 		logger:                    logger,
