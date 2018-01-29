@@ -31,12 +31,13 @@ type ClientProtobufGroup struct {
 	counter             uint64
 	maxIdleConnsPerHost int
 
-	limiter limiter.ServerLimiter
-	logger  *zap.Logger
-	timeout Timeouts
+	limiter  limiter.ServerLimiter
+	logger   *zap.Logger
+	timeout  Timeouts
+	maxTries int
 }
 
-func NewClientProtobufGroupWithLimiter(groupName string, servers []string, limiter limiter.ServerLimiter, maxIdleConns int, timeout Timeouts, keepAliveInterval time.Duration) (*ClientProtobufGroup, error) {
+func NewClientProtobufGroupWithLimiter(groupName string, servers []string, limiter limiter.ServerLimiter, maxIdleConns, maxTries int, timeout Timeouts, keepAliveInterval time.Duration) (*ClientProtobufGroup, error) {
 	httpClient := &http.Client{
 		Transport: &http.Transport{
 			MaxIdleConnsPerHost: maxIdleConns,
@@ -52,6 +53,7 @@ func NewClientProtobufGroupWithLimiter(groupName string, servers []string, limit
 		groupName: groupName,
 		servers:   servers,
 		timeout:   timeout,
+		maxTries:  maxTries,
 
 		client:  httpClient,
 		limiter: limiter,
@@ -60,10 +62,10 @@ func NewClientProtobufGroupWithLimiter(groupName string, servers []string, limit
 	return c, nil
 }
 
-func NewClientProtobufGroup(groupName string, servers []string, concurencyLimit, maxIdleConns int, timeout Timeouts, keepAliveInterval time.Duration) (*ClientProtobufGroup, error) {
+func NewClientProtobufGroup(groupName string, servers []string, concurencyLimit, maxIdleConns, maxTries int, timeout Timeouts, keepAliveInterval time.Duration) (*ClientProtobufGroup, error) {
 	limiter := limiter.NewServerLimiter(servers, concurencyLimit)
 
-	return NewClientProtobufGroupWithLimiter(groupName, servers, limiter, maxIdleConns, timeout, keepAliveInterval)
+	return NewClientProtobufGroupWithLimiter(groupName, servers, limiter, maxIdleConns, maxTries, timeout, keepAliveInterval)
 }
 
 func (c *ClientProtobufGroup) pickServer() string {
@@ -71,7 +73,7 @@ func (c *ClientProtobufGroup) pickServer() string {
 		// No need to do heavy operations here
 		return c.servers[0]
 	}
-	logger := zapwriter.Logger("picker").With(zap.String("groupName", c.groupName))
+	logger := c.logger.With(zap.String("function", "picker"))
 	counter := atomic.AddUint64(&(c.counter), 1)
 	idx := counter % uint64(len(c.servers))
 	srv := c.servers[int(idx)]
@@ -152,18 +154,13 @@ func (c *ClientProtobufGroup) doRequest(ctx context.Context, uri string) (*serve
 }
 
 func (c *ClientProtobufGroup) doQuery(ctx context.Context, uri string) (*serverResponse, error) {
-	maxTries := 3
+	maxTries := c.maxTries
 	if len(c.servers) > maxTries {
 		maxTries = len(c.servers)
 	}
-	try := 0
 	var res *serverResponse
 	var err error
-	for {
-		if try > maxTries {
-			break
-		}
-		try++
+	for try := 0; try < maxTries; try++ {
 		res, err = c.doRequest(ctx, uri)
 		if err != nil {
 			if err == ErrNotFound {
@@ -294,7 +291,7 @@ func (c *ClientProtobufGroup) Stats(ctx context.Context) (*pbgrpc.MetricDetailsR
 }
 
 func (c *ClientProtobufGroup) ProbeTLDs(ctx context.Context) ([]string, error) {
-	logger := zapwriter.Logger("probe").With(zap.String("groupName", c.groupName))
+	logger := c.logger.With(zap.String("function", "prober"))
 	req := &pbgrpc.MultiGlobRequest{
 		Metrics: []string{"*"},
 	}

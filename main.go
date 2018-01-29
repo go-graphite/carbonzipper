@@ -56,18 +56,19 @@ type GraphiteConfig struct {
 
 // config contains necessary information for global
 var config = struct {
-	Backends   []string           `yaml:"backends"`
-	Backendsv2 []zipper.BackendV2 `yaml:"backendsv2"`
-	MaxProcs   int                `yaml:"maxProcs"`
-	Graphite   GraphiteConfig     `yaml:"graphite"`
-	GRPCListen string             `yaml:"grpcListen"`
-	Listen     string             `yaml:"listen"`
-	Buckets    int                `yaml:"buckets"`
+	Backends   []string          `yaml:"backends"`
+	Backendsv2 zipper.BackendsV2 `yaml:"backendsv2"`
+	MaxProcs   int               `yaml:"maxProcs"`
+	Graphite   GraphiteConfig    `yaml:"graphite"`
+	GRPCListen string            `yaml:"grpcListen"`
+	Listen     string            `yaml:"listen"`
+	Buckets    int               `yaml:"buckets"`
 
 	Timeouts          zipper.Timeouts `yaml:"timeouts"`
 	KeepAliveInterval time.Duration   `yaml:"keepAliveInterval"`
 
-	CarbonSearch zipper.CarbonSearch `yaml:"carbonsearch"`
+	CarbonSearch   zipper.CarbonSearch   `yaml:"carbonsearch"`
+	CarbonSearchV2 zipper.CarbonSearchV2 `yaml:"carbonsearchv2"`
 
 	MaxIdleConnsPerHost int `yaml:"maxIdleConnsPerHost"`
 
@@ -564,7 +565,7 @@ func main() {
 		)
 	}
 
-	if len(config.Backends) == 0 && len(config.Backendsv2) == 0 {
+	if len(config.Backends) == 0 && len(config.Backendsv2.Backends) == 0 {
 		logger.Fatal("no Backends loaded -- exiting")
 	}
 
@@ -585,7 +586,7 @@ func main() {
 		}
 	}()
 
-	searchConfigured = len(config.CarbonSearch.Prefix) > 0 && len(config.CarbonSearch.Backend) > 0
+	searchConfigured = (len(config.CarbonSearch.Prefix) > 0 && len(config.CarbonSearch.Backend) > 0) || (len(config.CarbonSearchV2.Prefix) > 0 && len(config.CarbonSearchV2.Backends) > 0)
 
 	logger = zapwriter.Logger("main")
 	logger.Info("starting carbonzipper",
@@ -617,6 +618,7 @@ func main() {
 		BackendsV2:                config.Backendsv2,
 
 		CarbonSearch:      config.CarbonSearch,
+		CarbonSearchV2:    config.CarbonSearchV2,
 		Timeouts:          config.Timeouts,
 		KeepAliveInterval: config.KeepAliveInterval,
 	}

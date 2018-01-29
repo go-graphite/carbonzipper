@@ -47,6 +47,7 @@ message FetchResponse {
     uint32 stopTime = 3;
     repeated double values = 4;
     MetricMetadata metadata = 5;
+    repeated string AppliedFunctions = 6;
 }
 
 message MultiFetchResponse {
