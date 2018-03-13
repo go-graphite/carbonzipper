@@ -3,10 +3,9 @@ package zipper
 import (
 	"fmt"
 	"math"
-	"strings"
 	"testing"
 
-	pbgrpc "github.com/go-graphite/carbonzipper/carbonzippergrpcpb"
+	pbgrpc "github.com/go-graphite/protocol/carbonapi_v3_pb"
 )
 
 type mergeValuesData struct {
@@ -17,25 +16,35 @@ type mergeValuesData struct {
 	expectedError  error
 }
 
-var errMetadataMismatchFmt = "metadata mismatch, got %v, expected %v"
-var errLengthMismatchFmt = "length mismatch, got %v, expected %v"
-var errContentMismatchFmt = "content mismatch at pos %v, got %v, expected %v"
+var (
+	errMetadataMismatchFmt = "%v mismatch, got %v, expected %v"
+	errLengthMismatchFmt   = "length mismatch, got %v, expected %v"
+	errContentMismatchFmt  = "content mismatch at pos %v, got %v, expected %v"
+)
 
 func fetchResponseEquals(r1, r2 *pbgrpc.FetchResponse) error {
 	if r1.StartTime != r2.StartTime {
-		return fmt.Errorf(errMetadataMismatchFmt, r1.StartTime, r2.StartTime)
+		return fmt.Errorf(errMetadataMismatchFmt, "StartTime", r1.StartTime, r2.StartTime)
 	}
 
 	if r1.StopTime != r2.StopTime {
-		return fmt.Errorf(errMetadataMismatchFmt, r1.StopTime, r2.StopTime)
+		return fmt.Errorf(errMetadataMismatchFmt, "StopTime", r1.StopTime, r2.StopTime)
 	}
 
-	if strings.Compare(r1.Name, r2.Name) != 0 {
-		return fmt.Errorf(errMetadataMismatchFmt, r1.Name, r2.Name)
+	if r1.XFilesFactor != r2.XFilesFactor {
+		return fmt.Errorf(errMetadataMismatchFmt, "XFilesFactor", r1.XFilesFactor, r2.XFilesFactor)
 	}
 
-	if r1.Metadata.StepTime != r2.Metadata.StepTime || strings.Compare(r1.Metadata.AggregationFunction, r2.Metadata.AggregationFunction) != 0 {
-		return fmt.Errorf(errMetadataMismatchFmt, r1.Metadata, r2.Metadata)
+	if r1.Name != r2.Name {
+		return fmt.Errorf(errMetadataMismatchFmt, "Name", r1.Name, r2.Name)
+	}
+
+	if r1.StepTime != r2.StepTime {
+		return fmt.Errorf(errMetadataMismatchFmt, "StepTime", r1.StepTime, r2.StepTime)
+	}
+
+	if r1.ConsolidationFunc != r2.ConsolidationFunc {
+		return fmt.Errorf(errMetadataMismatchFmt, "ConsolidationFunc", r1.ConsolidationFunc, r2.ConsolidationFunc)
 	}
 
 	if len(r1.Values) != len(r2.Values) {
@@ -60,36 +69,27 @@ func TestMergeValues(t *testing.T) {
 			name: "simple 1",
 			// 60 seconds
 			m1: pbgrpc.FetchResponse{
-				Name:      "foo",
-				StartTime: 60,
-				StopTime:  660,
-				Metadata: &pbgrpc.MetricMetadata{
-					StepTime:            60,
-					AggregationFunction: "avg",
-				},
-				Values: []float64{1, 2, 3, 4, 5, 6, 7, 8, 9, 0},
+				Name:                "foo",
+				StartTime:           60,
+				StepTime:            60,
+				AggregationFunction: "avg",
+				Values:              []float64{1, 2, 3, 4, 5, 6, 7, 8, 9, 0},
 			},
 			// 120 seconds
 			m2: pbgrpc.FetchResponse{
-				Name:      "foo",
-				StartTime: 0,
-				StopTime:  600,
-				Metadata: &pbgrpc.MetricMetadata{
-					StepTime:            120,
-					AggregationFunction: "avg",
-				},
-				Values: []float64{1, 3, 5, 7, 9},
+				Name:                "foo",
+				StartTime:           0,
+				StepTime:            120,
+				AggregationFunction: "avg",
+				Values:              []float64{1, 3, 5, 7, 9},
 			},
 
 			expectedResult: pbgrpc.FetchResponse{
-				Name:      "foo",
-				StartTime: 60,
-				StopTime:  660,
-				Metadata: &pbgrpc.MetricMetadata{
-					StepTime:            60,
-					AggregationFunction: "avg",
-				},
-				Values: []float64{1, 2, 3, 4, 5, 6, 7, 8, 9, 0},
+				Name:                "foo",
+				StartTime:           60,
+				StepTime:            60,
+				AggregationFunction: "avg",
+				Values:              []float64{1, 2, 3, 4, 5, 6, 7, 8, 9, 0},
 			},
 
 			expectedError: nil,
@@ -98,36 +98,27 @@ func TestMergeValues(t *testing.T) {
 			name: "simple 2",
 			// 60 seconds
 			m1: pbgrpc.FetchResponse{
-				Name:      "foo",
-				StartTime: 0,
-				StopTime:  600,
-				Metadata: &pbgrpc.MetricMetadata{
-					StepTime:            120,
-					AggregationFunction: "avg",
-				},
-				Values: []float64{1, 3, 5, 7, 9},
+				Name:                "foo",
+				StartTime:           0,
+				StepTime:            120,
+				AggregationFunction: "avg",
+				Values:              []float64{1, 3, 5, 7, 9},
 			},
 			// 120 seconds
 			m2: pbgrpc.FetchResponse{
-				Name:      "foo",
-				StartTime: 60,
-				StopTime:  660,
-				Metadata: &pbgrpc.MetricMetadata{
-					StepTime:            60,
-					AggregationFunction: "avg",
-				},
-				Values: []float64{1, 2, 3, 4, 5, 6, 7, 8, 9, 0},
+				Name:                "foo",
+				StartTime:           60,
+				StepTime:            60,
+				AggregationFunction: "avg",
+				Values:              []float64{1, 2, 3, 4, 5, 6, 7, 8, 9, 0},
 			},
 
 			expectedResult: pbgrpc.FetchResponse{
-				Name:      "foo",
-				StartTime: 60,
-				StopTime:  660,
-				Metadata: &pbgrpc.MetricMetadata{
-					StepTime:            60,
-					AggregationFunction: "avg",
-				},
-				Values: []float64{1, 2, 3, 4, 5, 6, 7, 8, 9, 0},
+				Name:                "foo",
+				StartTime:           60,
+				StepTime:            60,
+				AggregationFunction: "avg",
+				Values:              []float64{1, 2, 3, 4, 5, 6, 7, 8, 9, 0},
 			},
 
 			expectedError: nil,
@@ -136,36 +127,27 @@ func TestMergeValues(t *testing.T) {
 			name: "fill the gaps simple",
 			// 60 seconds
 			m1: pbgrpc.FetchResponse{
-				Name:      "foo",
-				StartTime: 60,
-				StopTime:  1260,
-				Metadata: &pbgrpc.MetricMetadata{
-					StepTime:            60,
-					AggregationFunction: "avg",
-				},
-				Values: []float64{1, 2, 3, 4, math.NaN(), 6, 7, 8, 9, math.NaN(), 11, 12, 13, 14, 15, 16, math.NaN(), math.NaN(), math.NaN(), 20},
+				Name:                "foo",
+				StartTime:           60,
+				StepTime:            60,
+				AggregationFunction: "avg",
+				Values:              []float64{1, 2, 3, 4, math.NaN(), 6, 7, 8, 9, math.NaN(), 11, 12, 13, 14, 15, 16, math.NaN(), math.NaN(), math.NaN(), 20},
 			},
 			// 120 seconds
 			m2: pbgrpc.FetchResponse{
-				Name:      "foo",
-				StartTime: 60,
-				StopTime:  1260,
-				Metadata: &pbgrpc.MetricMetadata{
-					StepTime:            60,
-					AggregationFunction: "avg",
-				},
-				Values: []float64{1, 2, math.NaN(), math.NaN(), 5, 6, 7, 8, 9, math.NaN(), 11, 12, math.NaN(), 14, 15, 16, 17, 18, math.NaN(), 20},
+				Name:                "foo",
+				StartTime:           60,
+				StepTime:            60,
+				AggregationFunction: "avg",
+				Values:              []float64{1, 2, math.NaN(), math.NaN(), 5, 6, 7, 8, 9, math.NaN(), 11, 12, math.NaN(), 14, 15, 16, 17, 18, math.NaN(), 20},
 			},
 
 			expectedResult: pbgrpc.FetchResponse{
-				Name:      "foo",
-				StartTime: 60,
-				StopTime:  1260,
-				Metadata: &pbgrpc.MetricMetadata{
-					StepTime:            60,
-					AggregationFunction: "avg",
-				},
-				Values: []float64{1, 2, 3, 4, 5, 6, 7, 8, 9, math.NaN(), 11, 12, 13, 14, 15, 16, 17, 18, math.NaN(), 20},
+				Name:                "foo",
+				StartTime:           60,
+				StepTime:            60,
+				AggregationFunction: "avg",
+				Values:              []float64{1, 2, 3, 4, 5, 6, 7, 8, 9, math.NaN(), 11, 12, 13, 14, 15, 16, 17, 18, math.NaN(), 20},
 			},
 
 			expectedError: nil,
@@ -174,36 +156,27 @@ func TestMergeValues(t *testing.T) {
 			name: "fill the gaps 1",
 			// 60 seconds
 			m1: pbgrpc.FetchResponse{
-				Name:      "foo",
-				StartTime: 0,
-				StopTime:  1200,
-				Metadata: &pbgrpc.MetricMetadata{
-					StepTime:            120,
-					AggregationFunction: "avg",
-				},
-				Values: []float64{1, math.NaN(), 5, 7, 9, 11, 13, 15, 17, 19},
+				Name:                "foo",
+				StartTime:           0,
+				StepTime:            120,
+				AggregationFunction: "avg",
+				Values:              []float64{1, math.NaN(), 5, 7, 9, 11, 13, 15, 17, 19},
 			},
 			// 120 seconds
 			m2: pbgrpc.FetchResponse{
-				Name:      "foo",
-				StartTime: 60,
-				StopTime:  1260,
-				Metadata: &pbgrpc.MetricMetadata{
-					StepTime:            60,
-					AggregationFunction: "avg",
-				},
-				Values: []float64{1, 2, math.NaN(), math.NaN(), 5, 6, 7, 8, 9, math.NaN(), 11, 12, math.NaN(), 14, 15, 16, 17, 18, math.NaN(), 20},
+				Name:                "foo",
+				StartTime:           60,
+				StepTime:            60,
+				AggregationFunction: "avg",
+				Values:              []float64{1, 2, math.NaN(), math.NaN(), 5, 6, 7, 8, 9, math.NaN(), 11, 12, math.NaN(), 14, 15, 16, 17, 18, math.NaN(), 20},
 			},
 
 			expectedResult: pbgrpc.FetchResponse{
-				Name:      "foo",
-				StartTime: 60,
-				StopTime:  1260,
-				Metadata: &pbgrpc.MetricMetadata{
-					StepTime:            60,
-					AggregationFunction: "avg",
-				},
-				Values: []float64{1, 2, math.NaN(), math.NaN(), 5, 6, 7, 8, 9, 9, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20},
+				Name:                "foo",
+				StartTime:           60,
+				StepTime:            60,
+				AggregationFunction: "avg",
+				Values:              []float64{1, 2, math.NaN(), math.NaN(), 5, 6, 7, 8, 9, 9, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20},
 			},
 
 			expectedError: nil,
@@ -212,36 +185,27 @@ func TestMergeValues(t *testing.T) {
 			name: "fill end of metric",
 			// 60 seconds
 			m1: pbgrpc.FetchResponse{
-				Name:      "foo",
-				StartTime: 60,
-				StopTime:  1200,
-				Metadata: &pbgrpc.MetricMetadata{
-					StepTime:            60,
-					AggregationFunction: "avg",
-				},
-				Values: []float64{1, 2, 3, 4, math.NaN(), 6, 7, 8, 9, math.NaN(), 11, 12, 13, 14, 15, 16, math.NaN(), math.NaN(), math.NaN()},
+				Name:                "foo",
+				StartTime:           60,
+				StepTime:            60,
+				AggregationFunction: "avg",
+				Values:              []float64{1, 2, 3, 4, math.NaN(), 6, 7, 8, 9, math.NaN(), 11, 12, 13, 14, 15, 16, math.NaN(), math.NaN(), math.NaN()},
 			},
 			// 120 seconds
 			m2: pbgrpc.FetchResponse{
-				Name:      "foo",
-				StartTime: 60,
-				StopTime:  1260,
-				Metadata: &pbgrpc.MetricMetadata{
-					StepTime:            60,
-					AggregationFunction: "avg",
-				},
-				Values: []float64{1, 2, math.NaN(), math.NaN(), 5, 6, 7, 8, 9, math.NaN(), 11, 12, math.NaN(), 14, 15, 16, 17, 18, math.NaN(), 20},
+				Name:                "foo",
+				StartTime:           60,
+				StepTime:            60,
+				AggregationFunction: "avg",
+				Values:              []float64{1, 2, math.NaN(), math.NaN(), 5, 6, 7, 8, 9, math.NaN(), 11, 12, math.NaN(), 14, 15, 16, 17, 18, math.NaN(), 20},
 			},
 
 			expectedResult: pbgrpc.FetchResponse{
-				Name:      "foo",
-				StartTime: 60,
-				StopTime:  1260,
-				Metadata: &pbgrpc.MetricMetadata{
-					StepTime:            60,
-					AggregationFunction: "avg",
-				},
-				Values: []float64{1, 2, 3, 4, 5, 6, 7, 8, 9, math.NaN(), 11, 12, 13, 14, 15, 16, 17, 18, math.NaN(), 20},
+				Name:                "foo",
+				StartTime:           60,
+				StepTime:            60,
+				AggregationFunction: "avg",
+				Values:              []float64{1, 2, 3, 4, 5, 6, 7, 8, 9, math.NaN(), 11, 12, 13, 14, 15, 16, 17, 18, math.NaN(), 20},
 			},
 
 			expectedError: nil,

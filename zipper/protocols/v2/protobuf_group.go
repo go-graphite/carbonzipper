@@ -1,4 +1,4 @@
-package zipper
+package v2
 
 import (
 	"context"
@@ -9,20 +9,32 @@ import (
 	"net/url"
 	"strconv"
 	"sync/atomic"
-	"time"
 
-	pbgrpc "github.com/go-graphite/carbonzipper/carbonzippergrpcpb"
-	pb3 "github.com/go-graphite/carbonzipper/carbonzipperpb3"
 	"github.com/go-graphite/carbonzipper/limiter"
 	cu "github.com/go-graphite/carbonzipper/util/apictx"
 	util "github.com/go-graphite/carbonzipper/util/zipperctx"
+	"github.com/go-graphite/carbonzipper/zipper/metadata"
+	"github.com/go-graphite/carbonzipper/zipper/types"
+	protov2 "github.com/go-graphite/protocol/carbonapi_v2_pb"
+	protov3 "github.com/go-graphite/protocol/carbonapi_v3_pb"
 
 	"github.com/lomik/zapwriter"
 	"go.uber.org/zap"
 )
 
+func init() {
+	aliases := []string{"carbonapi_v2_pb", "proto_v2_pb", "v2_pb", "pb", "pb3", "protobuf", "protobuf3"}
+	metadata.Metadata.Lock()
+	for _, name := range aliases {
+		metadata.Metadata.SupportedProtocols[name] = struct{}{}
+		metadata.Metadata.ProtocolInits[name] = NewClientProtoV2Group
+		metadata.Metadata.ProtocolInitsWithLimiter[name] = NewClientProtoV2GroupWithLimiter
+	}
+	defer metadata.Metadata.Unlock()
+}
+
 // RoundRobin is used to connect to backends inside clientGroups, implements ServerClient interface
-type ClientProtobufGroup struct {
+type ClientProtoV2Group struct {
 	groupName string
 	servers   []string
 
@@ -33,42 +45,42 @@ type ClientProtobufGroup struct {
 
 	limiter  limiter.ServerLimiter
 	logger   *zap.Logger
-	timeout  Timeouts
+	timeout  types.Timeouts
 	maxTries int
 }
 
-func NewClientProtobufGroupWithLimiter(groupName string, servers []string, limiter limiter.ServerLimiter, maxIdleConns, maxTries int, timeout Timeouts, keepAliveInterval time.Duration) (*ClientProtobufGroup, error) {
+func NewClientProtoV2GroupWithLimiter(config types.BackendV2, limiter limiter.ServerLimiter) (*ClientProtoV2Group, error) {
 	httpClient := &http.Client{
 		Transport: &http.Transport{
-			MaxIdleConnsPerHost: maxIdleConns,
+			MaxIdleConnsPerHost: *config.MaxIdleConnsPerHost,
 			DialContext: (&net.Dialer{
-				Timeout:   timeout.Connect,
-				KeepAlive: keepAliveInterval,
+				Timeout:   config.Timeouts.Connect,
+				KeepAlive: *config.KeepAliveInterval,
 				DualStack: true,
 			}).DialContext,
 		},
 	}
 
-	c := &ClientProtobufGroup{
-		groupName: groupName,
-		servers:   servers,
-		timeout:   timeout,
-		maxTries:  maxTries,
+	c := &ClientProtoV2Group{
+		groupName: config.GroupName,
+		servers:   config.Servers,
+		timeout:   *config.Timeouts,
+		maxTries:  *config.MaxTries,
 
 		client:  httpClient,
 		limiter: limiter,
-		logger:  zapwriter.Logger("protobufGroup").With(zap.String("name", groupName)),
+		logger:  zapwriter.Logger("protobufGroup").With(zap.String("name", config.GroupName)),
 	}
 	return c, nil
 }
 
-func NewClientProtobufGroup(groupName string, servers []string, concurencyLimit, maxIdleConns, maxTries int, timeout Timeouts, keepAliveInterval time.Duration) (*ClientProtobufGroup, error) {
-	limiter := limiter.NewServerLimiter(servers, concurencyLimit)
+func NewClientProtoV2Group(config types.BackendV2) (*ClientProtoV2Group, error) {
+	limiter := limiter.NewServerLimiter(config.Servers, *config.ConcurrencyLimit)
 
-	return NewClientProtobufGroupWithLimiter(groupName, servers, limiter, maxIdleConns, maxTries, timeout, keepAliveInterval)
+	return NewClientProtoV2GroupWithLimiter(config, limiter)
 }
 
-func (c *ClientProtobufGroup) pickServer() string {
+func (c *ClientProtoV2Group) pickServer() string {
 	if len(c.servers) == 1 {
 		// No need to do heavy operations here
 		return c.servers[0]
@@ -91,7 +103,7 @@ type serverResponse struct {
 	response []byte
 }
 
-func (c *ClientProtobufGroup) doRequest(ctx context.Context, uri string) (*serverResponse, error) {
+func (c *ClientProtoV2Group) doRequest(ctx context.Context, uri string) (*serverResponse, error) {
 	server := c.pickServer()
 
 	u, err := url.Parse(server + uri)
@@ -132,14 +144,14 @@ func (c *ClientProtobufGroup) doRequest(ctx context.Context, uri string) (*serve
 		c.logger.Error("status not ok, not found",
 			zap.Int("status_code", resp.StatusCode),
 		)
-		return nil, ErrNotFound
+		return nil, types.ErrNotFound
 	}
 
 	if resp.StatusCode != http.StatusOK {
 		c.logger.Error("status not ok",
 			zap.Int("status_code", resp.StatusCode),
 		)
-		return nil, fmt.Errorf(ErrFailedToFetchFmt, c.groupName, resp.StatusCode)
+		return nil, fmt.Errorf(types.ErrFailedToFetchFmt, c.groupName, resp.StatusCode)
 	}
 
 	body, err := ioutil.ReadAll(resp.Body)
@@ -153,7 +165,7 @@ func (c *ClientProtobufGroup) doRequest(ctx context.Context, uri string) (*serve
 	return &serverResponse{server: server, response: body}, nil
 }
 
-func (c *ClientProtobufGroup) doQuery(ctx context.Context, uri string) (*serverResponse, error) {
+func (c *ClientProtoV2Group) doQuery(ctx context.Context, uri string) (*serverResponse, error) {
 	maxTries := c.maxTries
 	if len(c.servers) > maxTries {
 		maxTries = len(c.servers)
@@ -163,7 +175,7 @@ func (c *ClientProtobufGroup) doQuery(ctx context.Context, uri string) (*serverR
 	for try := 0; try < maxTries; try++ {
 		res, err = c.doRequest(ctx, uri)
 		if err != nil {
-			if err == ErrNotFound {
+			if err == types.ErrNotFound {
 				return nil, err
 			}
 			continue
@@ -175,12 +187,16 @@ func (c *ClientProtobufGroup) doQuery(ctx context.Context, uri string) (*serverR
 	return nil, err
 }
 
-func (c ClientProtobufGroup) Name() string {
+func (c ClientProtoV2Group) Name() string {
 	return c.groupName
 }
 
-func (c *ClientProtobufGroup) Fetch(ctx context.Context, request *pbgrpc.MultiFetchRequest) (*pbgrpc.MultiFetchResponse, *Stats, error) {
-	stats := &Stats{}
+func (c ClientProtoV2Group) Backends() []string {
+	return c.servers
+}
+
+func (c *ClientProtoV2Group) Fetch(ctx context.Context, request *protov3.MultiFetchRequest) (*protov3.MultiFetchResponse, *types.Stats, error) {
+	stats := &types.Stats{}
 	rewrite, _ := url.Parse("http://127.0.0.1/render/")
 
 	var targets []string
@@ -200,7 +216,7 @@ func (c *ClientProtobufGroup) Fetch(ctx context.Context, request *pbgrpc.MultiFe
 		return nil, stats, err
 	}
 
-	var metrics pb3.MultiFetchResponse
+	var metrics protov2.MultiFetchResponse
 	err = metrics.Unmarshal(res.response)
 	if err != nil {
 		return nil, stats, err
@@ -208,29 +224,27 @@ func (c *ClientProtobufGroup) Fetch(ctx context.Context, request *pbgrpc.MultiFe
 
 	stats.Servers = append(stats.Servers, res.server)
 
-	var r pbgrpc.MultiFetchResponse
+	var r protov3.MultiFetchResponse
 	for _, m := range metrics.Metrics {
-		r.Metrics = append(r.Metrics, pbgrpc.FetchResponse{
-			Name:      m.Name,
-			StopTime:  uint32(m.StopTime),
-			StartTime: uint32(m.StartTime),
-			Values:    m.Values,
-			Metadata: &pbgrpc.MetricMetadata{
-				StepTime:            uint32(m.StepTime),
-				AggregationFunction: "avg",
-			},
+		r.Metrics = append(r.Metrics, protov3.FetchResponse{
+			Name:              m.Name,
+			ConsolidationFunc: "average",
+			StopTime:          uint32(m.StopTime),
+			StartTime:         uint32(m.StartTime),
+			StepTime:          uint32(m.StepTime),
+			Values:            m.Values,
 		})
 	}
 
 	return &r, stats, nil
 }
 
-func (c *ClientProtobufGroup) Find(ctx context.Context, request *pbgrpc.MultiGlobRequest) (*pbgrpc.MultiGlobResponse, *Stats, error) {
-	stats := &Stats{}
+func (c *ClientProtoV2Group) Find(ctx context.Context, request *protov3.MultiGlobRequest) (*protov3.MultiGlobResponse, *types.Stats, error) {
+	stats := &types.Stats{}
 	rewrite, _ := url.Parse("http://127.0.0.1/metrics/find/")
 
-	var r pbgrpc.MultiGlobResponse
-	r.Metrics = make(map[string]pbgrpc.GlobResponse)
+	var r protov3.MultiGlobResponse
+	r.Metrics = make([]protov3.GlobResponse, 0)
 	var errors []error
 	for _, query := range request.Metrics {
 		v := url.Values{
@@ -243,24 +257,24 @@ func (c *ClientProtobufGroup) Find(ctx context.Context, request *pbgrpc.MultiGlo
 			errors = append(errors, err)
 			continue
 		}
-		var globs pb3.GlobResponse
+		var globs protov2.GlobResponse
 		err = globs.Unmarshal(res.response)
 		if err != nil {
 			errors = append(errors, err)
 			continue
 		}
 		stats.Servers = append(stats.Servers, res.server)
-		matches := make([]pbgrpc.GlobMatch, 0, len(globs.Matches))
+		matches := make([]protov3.GlobMatch, 0, len(globs.Matches))
 		for _, m := range globs.Matches {
-			matches = append(matches, pbgrpc.GlobMatch{
+			matches = append(matches, protov3.GlobMatch{
 				Path:   m.Path,
 				IsLeaf: m.IsLeaf,
 			})
 		}
-		r.Metrics[query] = pbgrpc.GlobResponse{
+		r.Metrics = append(r.Metrics, protov3.GlobResponse{
 			Name:    globs.Name,
 			Matches: matches,
-		}
+		})
 	}
 
 	if len(errors) != 0 {
@@ -274,25 +288,25 @@ func (c *ClientProtobufGroup) Find(ctx context.Context, request *pbgrpc.MultiGlo
 	}
 
 	if len(r.Metrics) == 0 {
-		return nil, stats, ErrNoResponseFetched
+		return nil, stats, types.ErrNoResponseFetched
 	}
 	return &r, stats, nil
 }
 
-func (c *ClientProtobufGroup) Info(ctx context.Context, request *pbgrpc.MultiMetricsInfoRequest) (*pbgrpc.MultiMetricsInfoResponse, *Stats, error) {
-	return nil, nil, ErrNotImplementedYet
+func (c *ClientProtoV2Group) Info(ctx context.Context, request *protov3.MultiMetricsInfoRequest) (*protov3.ZipperInfoResponse, *types.Stats, error) {
+	return nil, nil, types.ErrNotImplementedYet
 }
 
-func (c *ClientProtobufGroup) List(ctx context.Context) (*pbgrpc.ListMetricsResponse, *Stats, error) {
-	return nil, nil, ErrNotImplementedYet
+func (c *ClientProtoV2Group) List(ctx context.Context) (*protov3.ListMetricsResponse, *types.Stats, error) {
+	return nil, nil, types.ErrNotImplementedYet
 }
-func (c *ClientProtobufGroup) Stats(ctx context.Context) (*pbgrpc.MetricDetailsResponse, *Stats, error) {
-	return nil, nil, ErrNotImplementedYet
+func (c *ClientProtoV2Group) Stats(ctx context.Context) (*protov3.MetricDetailsResponse, *types.Stats, error) {
+	return nil, nil, types.ErrNotImplementedYet
 }
 
-func (c *ClientProtobufGroup) ProbeTLDs(ctx context.Context) ([]string, error) {
+func (c *ClientProtoV2Group) ProbeTLDs(ctx context.Context) ([]string, error) {
 	logger := c.logger.With(zap.String("function", "prober"))
-	req := &pbgrpc.MultiGlobRequest{
+	req := &protov3.MultiGlobRequest{
 		Metrics: []string{"*"},
 	}
 

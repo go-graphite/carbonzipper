@@ -1,11 +1,12 @@
-package zipper
+package broadcast
 
 import (
 	"context"
 
-	pbgrpc "github.com/go-graphite/carbonzipper/carbonzippergrpcpb"
 	"github.com/go-graphite/carbonzipper/limiter"
 	"github.com/go-graphite/carbonzipper/pathcache"
+	"github.com/go-graphite/carbonzipper/zipper/types"
+	protov3 "github.com/go-graphite/protocol/carbonapi_v3_pb"
 
 	"github.com/lomik/zapwriter"
 	"go.uber.org/zap"
@@ -14,34 +15,36 @@ import (
 type BroadcastGroup struct {
 	limiter   limiter.ServerLimiter
 	groupName string
-	timeout   Timeouts
-	clients   []ServerClient
+	timeout   types.Timeouts
+	clients   []types.ServerClient
+	servers   []string
 
 	pathCache pathcache.PathCache
 }
 
-func NewBroadcastGroup(groupName string, servers []ServerClient, pathCache pathcache.PathCache, concurencyLimit int, timeout Timeouts) (*BroadcastGroup, error) {
-	srvs := make([]string, 0, len(servers))
+func NewBroadcastGroup(groupName string, servers []types.ServerClient, pathCache pathcache.PathCache, concurencyLimit int, timeout types.Timeouts) (*BroadcastGroup, error) {
+	serverNames := make([]string, 0, len(servers))
 	for _, s := range servers {
-		srvs = append(srvs, s.Name())
+		serverNames = append(serverNames, s.Name())
 	}
 	logger := zapwriter.Logger("broadCastNewGroup")
 	logger.Info("limiter will be created",
 		zap.String("name", groupName),
-		zap.Strings("servrers", srvs),
+		zap.Strings("servrers", serverNames),
 		zap.Int("concurency_limit", concurencyLimit),
 	)
-	limiter := limiter.NewServerLimiter(srvs, concurencyLimit)
+	limiter := limiter.NewServerLimiter(serverNames, concurencyLimit)
 
-	return NewBroadcastGroupWithLimiter(groupName, servers, pathCache, limiter, timeout)
+	return NewBroadcastGroupWithLimiter(groupName, servers, serverNames, pathCache, limiter, timeout)
 }
 
-func NewBroadcastGroupWithLimiter(groupName string, servers []ServerClient, pathCache pathcache.PathCache, limiter limiter.ServerLimiter, timeout Timeouts) (*BroadcastGroup, error) {
+func NewBroadcastGroupWithLimiter(groupName string, servers []types.ServerClient, serverNames []string, pathCache pathcache.PathCache, limiter limiter.ServerLimiter, timeout types.Timeouts) (*BroadcastGroup, error) {
 	return &BroadcastGroup{
 		timeout:   timeout,
 		groupName: groupName,
 		clients:   servers,
 		limiter:   limiter,
+		servers:   serverNames,
 
 		pathCache: pathCache,
 	}, nil
@@ -51,56 +54,60 @@ func (bg BroadcastGroup) Name() string {
 	return bg.groupName
 }
 
-func (bg *BroadcastGroup) Fetch(ctx context.Context, request *pbgrpc.MultiFetchRequest) (*pbgrpc.MultiFetchResponse, *Stats, error) {
-	resCh := make(chan *ServerFetchResponse, len(bg.clients))
+func (c BroadcastGroup) Backends() []string {
+	return c.servers
+}
+
+func (bg *BroadcastGroup) Fetch(ctx context.Context, request *protov3.MultiFetchRequest) (*protov3.MultiFetchResponse, *types.Stats, error) {
+	resCh := make(chan *types.ServerFetchResponse, len(bg.clients))
 	ctx, cancel := context.WithTimeout(ctx, bg.timeout.Render)
 	defer cancel()
 	for _, client := range bg.clients {
-		go func(client ServerClient) {
-			var r ServerFetchResponse
+		go func(client types.ServerClient) {
+			var r types.ServerFetchResponse
 			err := bg.limiter.Enter(ctx, bg.groupName)
 			if err != nil {
 				return
 			}
-			r.response, r.stats, r.err = client.Fetch(ctx, request)
+			r.Response, r.Stats, r.Err = client.Fetch(ctx, request)
 			resCh <- &r
 			bg.limiter.Leave(ctx, bg.groupName)
 		}(client)
 	}
 
-	var result ServerFetchResponse
+	var result types.ServerFetchResponse
 	var err error
 	for {
 		select {
 		case r := <-resCh:
-			if r.err != nil {
-				err = ErrNonFatalErrors
+			if r.Err != nil {
+				err = types.ErrNonFatalErrors
 				continue
 			}
 
-			if r.response != nil {
-				if result.response == nil {
+			if r.Response != nil {
+				if result.Response == nil {
 					result = *r
 				} else {
 					result.Merge(r)
 				}
 			}
 		case <-ctx.Done():
-			err = ErrTimeoutExceeded
+			err = types.ErrTimeoutExceeded
 			break
 		}
 	}
 
-	return result.response, result.stats, err
+	return result.Response, result.Stats, err
 }
 
-func (bg *BroadcastGroup) Find(ctx context.Context, request *pbgrpc.MultiGlobRequest) (*pbgrpc.MultiGlobResponse, *Stats, error) {
+func (bg *BroadcastGroup) Find(ctx context.Context, request *protov3.MultiGlobRequest) (*protov3.MultiGlobResponse, *types.Stats, error) {
 	logger := zapwriter.Logger("broadcastGroup").With(zap.String("groupName", bg.groupName))
-	resCh := make(chan *ServerFindResponse, len(bg.clients))
+	resCh := make(chan *types.ServerFindResponse, len(bg.clients))
 	ctx, cancel := context.WithTimeout(ctx, bg.timeout.Find)
 	defer cancel()
 	for _, client := range bg.clients {
-		go func(client ServerClient) {
+		go func(client types.ServerClient) {
 			logger.Debug("waiting for a slot",
 				zap.String("group_name", bg.groupName),
 				zap.String("client_name", client.Name()),
@@ -112,15 +119,15 @@ func (bg *BroadcastGroup) Find(ctx context.Context, request *pbgrpc.MultiGlobReq
 			}
 
 			logger.Debug("got a slot")
-			var r ServerFindResponse
-			r.response, r.stats, r.err = client.Find(ctx, request)
+			var r types.ServerFindResponse
+			r.Response, r.Stats, r.Err = client.Find(ctx, request)
 			resCh <- &r
 			bg.limiter.Leave(ctx, bg.groupName)
 			logger.Debug("got result")
 		}(client)
 	}
 
-	var result ServerFindResponse
+	var result types.ServerFindResponse
 	var err error
 	responseCounts := 0
 GATHER:
@@ -128,39 +135,39 @@ GATHER:
 		select {
 		case r := <-resCh:
 			responseCounts++
-			if r.err == nil {
-				if r.response != nil {
-					if result.response == nil {
+			if r.Err == nil {
+				if r.Response != nil {
+					if result.Response == nil {
 						result = *r
 					} else {
 						result.Merge(r)
 					}
 				}
 			} else {
-				err = ErrNonFatalErrors
+				err = types.ErrNonFatalErrors
 			}
 
 			if responseCounts == len(bg.clients) {
 				break GATHER
 			}
 		case <-ctx.Done():
-			err = ErrTimeoutExceeded
+			err = types.ErrTimeoutExceeded
 			break
 		}
 	}
 
-	return result.response, result.stats, err
+	return result.Response, result.Stats, err
 }
 
-func (bg *BroadcastGroup) Info(ctx context.Context, request *pbgrpc.MultiMetricsInfoRequest) (*pbgrpc.MultiMetricsInfoResponse, *Stats, error) {
-	return nil, nil, ErrNotImplementedYet
+func (bg *BroadcastGroup) Info(ctx context.Context, request *protov3.MultiMetricsInfoRequest) (*protov3.ZipperInfoResponse, *types.Stats, error) {
+	return nil, nil, types.ErrNotImplementedYet
 }
 
-func (bg *BroadcastGroup) List(ctx context.Context) (*pbgrpc.ListMetricsResponse, *Stats, error) {
-	return nil, nil, ErrNotImplementedYet
+func (bg *BroadcastGroup) List(ctx context.Context) (*protov3.ListMetricsResponse, *types.Stats, error) {
+	return nil, nil, types.ErrNotImplementedYet
 }
-func (bg *BroadcastGroup) Stats(ctx context.Context) (*pbgrpc.MetricDetailsResponse, *Stats, error) {
-	return nil, nil, ErrNotImplementedYet
+func (bg *BroadcastGroup) Stats(ctx context.Context) (*protov3.MetricDetailsResponse, *types.Stats, error) {
+	return nil, nil, types.ErrNotImplementedYet
 }
 
 type tldResponse struct {
@@ -176,7 +183,7 @@ func (bg *BroadcastGroup) ProbeTLDs(ctx context.Context) ([]string, error) {
 	ctx, cancel := context.WithTimeout(ctx, bg.timeout.Find)
 
 	for _, client := range bg.clients {
-		go func(client ServerClient) {
+		go func(client types.ServerClient) {
 			logger.Debug("probeTLD",
 				zap.String("name", client.Name()),
 			)

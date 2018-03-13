@@ -2,13 +2,13 @@ package main
 
 import (
 	"context"
-	"time"
-
-	pb "github.com/go-graphite/carbonzipper/carbonzippergrpcpb"
-	gpb "github.com/golang/protobuf/ptypes/empty"
-
 	"fmt"
 	"net"
+	"time"
+
+	protov3grpc "github.com/go-graphite/protocol/carbonapi_v3_grpc"
+	pb "github.com/go-graphite/protocol/carbonapi_v3_pb"
+	gpb "github.com/golang/protobuf/ptypes/empty"
 
 	"github.com/lomik/zapwriter"
 	"go.uber.org/zap"
@@ -29,8 +29,8 @@ func (srv *GRPCServer) serve() {
 	srv.server.Serve(srv.listener)
 }
 
-func (srv GRPCServer) GetVersion(ctx context.Context, in *gpb.Empty) (*pb.ProtocolVersionResponse, error) {
-	return &pb.ProtocolVersionResponse{
+func (srv GRPCServer) GetVersion(ctx context.Context, in *gpb.Empty) (*protov3grpc.ProtocolVersionResponse, error) {
+	return &protov3grpc.ProtocolVersionResponse{
 		Version: 1,
 	}, nil
 }
@@ -148,7 +148,7 @@ func NewGRPCServer(address string) (*GRPCServer, error) {
 		server:   grpc.NewServer(),
 	}
 
-	pb.RegisterCarbonV1Server(srv.server, srv)
+	protov3grpc.RegisterCarbonV1Server(srv.server, srv)
 
 	go srv.serve()
 

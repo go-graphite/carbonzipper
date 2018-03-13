@@ -19,13 +19,14 @@ import (
 	"github.com/dgryski/httputil"
 	"github.com/facebookgo/grace/gracehttp"
 	"github.com/facebookgo/pidfile"
-	pb3 "github.com/go-graphite/carbonzipper/carbonzipperpb3"
 	"github.com/go-graphite/carbonzipper/intervalset"
 	"github.com/go-graphite/carbonzipper/mstats"
 	"github.com/go-graphite/carbonzipper/pathcache"
 	cu "github.com/go-graphite/carbonzipper/util/apictx"
 	util "github.com/go-graphite/carbonzipper/util/zipperctx"
 	"github.com/go-graphite/carbonzipper/zipper"
+	"github.com/go-graphite/carbonzipper/zipper/types"
+	protov2 "github.com/go-graphite/protocol/carbonapi_v2_pb"
 	"gopkg.in/yaml.v2"
 
 	"github.com/lomik/zapwriter"
@@ -56,19 +57,19 @@ type GraphiteConfig struct {
 
 // config contains necessary information for global
 var config = struct {
-	Backends   []string          `yaml:"backends"`
-	Backendsv2 zipper.BackendsV2 `yaml:"backendsv2"`
-	MaxProcs   int               `yaml:"maxProcs"`
-	Graphite   GraphiteConfig    `yaml:"graphite"`
-	GRPCListen string            `yaml:"grpcListen"`
-	Listen     string            `yaml:"listen"`
-	Buckets    int               `yaml:"buckets"`
+	Backends   []string         `yaml:"backends"`
+	Backendsv2 types.BackendsV2 `yaml:"backendsv2"`
+	MaxProcs   int              `yaml:"maxProcs"`
+	Graphite   GraphiteConfig   `yaml:"graphite"`
+	GRPCListen string           `yaml:"grpcListen"`
+	Listen     string           `yaml:"listen"`
+	Buckets    int              `yaml:"buckets"`
 
-	Timeouts          zipper.Timeouts `yaml:"timeouts"`
-	KeepAliveInterval time.Duration   `yaml:"keepAliveInterval"`
+	Timeouts          types.Timeouts `yaml:"timeouts"`
+	KeepAliveInterval time.Duration  `yaml:"keepAliveInterval"`
 
-	CarbonSearch   zipper.CarbonSearch   `yaml:"carbonsearch"`
-	CarbonSearchV2 zipper.CarbonSearchV2 `yaml:"carbonsearchv2"`
+	CarbonSearch   types.CarbonSearch   `yaml:"carbonsearch"`
+	CarbonSearchV2 types.CarbonSearchV2 `yaml:"carbonsearchv2"`
 
 	MaxIdleConnsPerHost int `yaml:"maxIdleConnsPerHost"`
 
@@ -89,7 +90,7 @@ var config = struct {
 	Listen:     ":8080",
 	Buckets:    10,
 
-	Timeouts: zipper.Timeouts{
+	Timeouts: types.Timeouts{
 		Render:  10000 * time.Second,
 		Find:    10 * time.Second,
 		Connect: 200 * time.Millisecond,
@@ -215,13 +216,13 @@ func findHandler(w http.ResponseWriter, req *http.Request) {
 	)
 }
 
-func EncodeFindResponse(format, query string, w http.ResponseWriter, metrics []pb3.GlobMatch) error {
+func EncodeFindResponse(format, query string, w http.ResponseWriter, metrics []protov2.GlobMatch) error {
 	var err error
 	var b []byte
 	switch format {
 	case "protobuf", "protobuf3":
 		w.Header().Set("Content-Type", contentTypeProtobuf)
-		var result pb3.GlobResponse
+		var result protov2.GlobResponse
 		result.Name = query
 		result.Matches = metrics
 		b, err = result.Marshal()
@@ -395,7 +396,7 @@ func renderHandler(w http.ResponseWriter, req *http.Request) {
 	)
 }
 
-func createRenderResponse(metrics *pb3.MultiFetchResponse, missing interface{}) []map[string]interface{} {
+func createRenderResponse(metrics *protov2.MultiFetchResponse, missing interface{}) []map[string]interface{} {
 
 	var response []map[string]interface{}
 
@@ -608,7 +609,7 @@ func main() {
 
 	/* Configure zipper */
 	// set up caches
-	zipperConfig := &zipper.Config{
+	zipperConfig := &types.Config{
 		PathCache:   pathcache.NewPathCache(config.ExpireDelaySec),
 		SearchCache: pathcache.NewPathCache(config.ExpireDelaySec),
 
@@ -773,7 +774,7 @@ func bucketRequestTimes(req *http.Request, t time.Duration) {
 	}
 }
 
-func sendStats(stats *zipper.Stats) {
+func sendStats(stats *types.Stats) {
 	if stats == nil {
 		return
 	}

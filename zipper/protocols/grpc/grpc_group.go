@@ -1,10 +1,14 @@
-package zipper
+package grpc
 
 import (
 	"context"
 	"math"
 
-	pbgrpc "github.com/go-graphite/carbonzipper/carbonzippergrpcpb"
+	"github.com/go-graphite/carbonzipper/limiter"
+	"github.com/go-graphite/carbonzipper/zipper/metadata"
+	"github.com/go-graphite/carbonzipper/zipper/types"
+	protov3grpc "github.com/go-graphite/protocol/carbonapi_v3_grpc"
+	protov3 "github.com/go-graphite/protocol/carbonapi_v3_pb"
 	"google.golang.org/grpc"
 	_ "google.golang.org/grpc/balancer/roundrobin"
 	"google.golang.org/grpc/resolver"
@@ -13,6 +17,17 @@ import (
 	"github.com/lomik/zapwriter"
 	"go.uber.org/zap"
 )
+
+func init() {
+	aliases := []string{"carbonapi_v3_grpc", "proto_v3_grpc", "v3_grpc"}
+	metadata.Metadata.Lock()
+	for _, name := range aliases {
+		metadata.Metadata.SupportedProtocols[name] = struct{}{}
+		metadata.Metadata.ProtocolInits[name] = NewClientGRPCGroup
+		metadata.Metadata.ProtocolInitsWithLimiter[name] = NewClientGRPCGroupWithLimiter
+	}
+	defer metadata.Metadata.Unlock()
+}
 
 // RoundRobin is used to connect to backends inside clientGRPCGroups, implements ServerClient interface
 type ClientGRPCGroup struct {
@@ -23,16 +38,20 @@ type ClientGRPCGroup struct {
 	conn     *grpc.ClientConn
 	dialerrc chan error
 	cleanup  func()
-	timeout  Timeouts
+	timeout  types.Timeouts
 
-	client pbgrpc.CarbonV1Client
+	client protov3grpc.CarbonV1Client
 }
 
-func NewClientGRPCGroup(groupName string, servers []string, timeout Timeouts) (*ClientGRPCGroup, error) {
+func NewClientGRPCGroupWithLimiter(config types.BackendV2, limiter limiter.ServerLimiter) (*ClientGRPCGroup, error) {
+	return NewClientGRPCGroup(config)
+}
+
+func NewClientGRPCGroup(config types.BackendV2) (*ClientGRPCGroup, error) {
 	// TODO: Implement normal resolver
 	r, cleanup := manual.GenerateAndRegisterManualResolver()
 	var resolvedAddrs []resolver.Address
-	for _, addr := range servers {
+	for _, addr := range config.Servers {
 		resolvedAddrs = append(resolvedAddrs, resolver.Address{Addr: addr})
 	}
 
@@ -54,14 +73,14 @@ func NewClientGRPCGroup(groupName string, servers []string, timeout Timeouts) (*
 	}
 
 	client := &ClientGRPCGroup{
-		groupName: groupName,
-		servers:   servers,
+		groupName: config.GroupName,
+		servers:   config.Servers,
 
 		r:       r,
 		cleanup: cleanup,
 		conn:    conn,
-		client:  pbgrpc.NewCarbonV1Client(conn),
-		timeout: timeout,
+		client:  protov3grpc.NewCarbonV1Client(conn),
+		timeout: *config.Timeouts,
 	}
 
 	return client, nil
@@ -71,8 +90,12 @@ func (c ClientGRPCGroup) Name() string {
 	return c.groupName
 }
 
-func (c *ClientGRPCGroup) Fetch(ctx context.Context, request *pbgrpc.MultiFetchRequest) (*pbgrpc.MultiFetchResponse, *Stats, error) {
-	stats := &Stats{
+func (c ClientGRPCGroup) Backends() []string {
+	return c.servers
+}
+
+func (c *ClientGRPCGroup) Fetch(ctx context.Context, request *protov3.MultiFetchRequest) (*protov3.MultiFetchResponse, *types.Stats, error) {
+	stats := &types.Stats{
 		Servers: []string{c.Name()},
 	}
 	ctx, cancel := context.WithTimeout(ctx, c.timeout.Render)
@@ -89,8 +112,8 @@ func (c *ClientGRPCGroup) Fetch(ctx context.Context, request *pbgrpc.MultiFetchR
 	return res, stats, err
 }
 
-func (c *ClientGRPCGroup) Find(ctx context.Context, request *pbgrpc.MultiGlobRequest) (*pbgrpc.MultiGlobResponse, *Stats, error) {
-	stats := &Stats{
+func (c *ClientGRPCGroup) Find(ctx context.Context, request *protov3.MultiGlobRequest) (*protov3.MultiGlobResponse, *types.Stats, error) {
+	stats := &types.Stats{
 		Servers: []string{c.Name()},
 	}
 	ctx, cancel := context.WithTimeout(ctx, c.timeout.Find)
@@ -106,8 +129,8 @@ func (c *ClientGRPCGroup) Find(ctx context.Context, request *pbgrpc.MultiGlobReq
 
 	return res, stats, err
 }
-func (c *ClientGRPCGroup) Info(ctx context.Context, request *pbgrpc.MultiMetricsInfoRequest) (*pbgrpc.MultiMetricsInfoResponse, *Stats, error) {
-	stats := &Stats{
+func (c *ClientGRPCGroup) Info(ctx context.Context, request *protov3.MultiMetricsInfoRequest) (*protov3.ZipperInfoResponse, *types.Stats, error) {
+	stats := &types.Stats{
 		Servers: []string{c.Name()},
 	}
 	ctx, cancel := context.WithTimeout(ctx, c.timeout.Render)
@@ -121,17 +144,23 @@ func (c *ClientGRPCGroup) Info(ctx context.Context, request *pbgrpc.MultiMetrics
 	}
 	stats.MemoryUsage = int64(res.Size())
 
-	return res, stats, err
+	r := &protov3.ZipperInfoResponse{
+		Info: map[string]protov3.MultiMetricsInfoResponse{
+			c.Name(): *res,
+		},
+	}
+
+	return r, stats, err
 }
 
-func (c *ClientGRPCGroup) List(ctx context.Context) (*pbgrpc.ListMetricsResponse, *Stats, error) {
-	stats := &Stats{
+func (c *ClientGRPCGroup) List(ctx context.Context) (*protov3.ListMetricsResponse, *types.Stats, error) {
+	stats := &types.Stats{
 		Servers: []string{c.Name()},
 	}
 	ctx, cancel := context.WithTimeout(ctx, c.timeout.Render)
 	defer cancel()
 
-	res, err := c.client.ListMetrics(ctx, emptyMsg)
+	res, err := c.client.ListMetrics(ctx, types.EmptyMsg)
 	if err != nil {
 		stats.RenderErrors++
 		stats.FailedServers = stats.Servers
@@ -141,14 +170,14 @@ func (c *ClientGRPCGroup) List(ctx context.Context) (*pbgrpc.ListMetricsResponse
 
 	return res, stats, err
 }
-func (c *ClientGRPCGroup) Stats(ctx context.Context) (*pbgrpc.MetricDetailsResponse, *Stats, error) {
-	stats := &Stats{
+func (c *ClientGRPCGroup) Stats(ctx context.Context) (*protov3.MetricDetailsResponse, *types.Stats, error) {
+	stats := &types.Stats{
 		Servers: []string{c.Name()},
 	}
 	ctx, cancel := context.WithTimeout(ctx, c.timeout.Render)
 	defer cancel()
 
-	res, err := c.client.Stats(ctx, emptyMsg)
+	res, err := c.client.Stats(ctx, types.EmptyMsg)
 	if err != nil {
 		stats.RenderErrors++
 		stats.FailedServers = stats.Servers
@@ -165,7 +194,7 @@ func (c *ClientGRPCGroup) ProbeTLDs(ctx context.Context) ([]string, error) {
 	ctx, cancel := context.WithTimeout(ctx, c.timeout.Find)
 	defer cancel()
 
-	req := &pbgrpc.MultiGlobRequest{
+	req := &protov3.MultiGlobRequest{
 		Metrics: []string{"*"},
 	}
 
