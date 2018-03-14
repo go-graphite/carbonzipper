@@ -2,6 +2,7 @@ package zipper
 
 import (
 	"context"
+	"fmt"
 	"math"
 	_ "net/http/pprof"
 	"time"
@@ -13,10 +14,11 @@ import (
 	"github.com/go-graphite/carbonzipper/zipper/types"
 	protov2 "github.com/go-graphite/protocol/carbonapi_v2_pb"
 	protov3 "github.com/go-graphite/protocol/carbonapi_v3_pb"
-	"github.com/pkg/errors"
-
 	"github.com/lomik/zapwriter"
 	"go.uber.org/zap"
+
+	_ "github.com/go-graphite/carbonzipper/zipper/protocols/grpc"
+	_ "github.com/go-graphite/carbonzipper/zipper/protocols/v2"
 )
 
 // Zipper provides interface to Zipper-related functions
@@ -77,11 +79,11 @@ func createBackendsV2(logger *zap.Logger, backends types.BackendsV2, pathCache p
 		maxIdleConnsPerHost := backends.MaxIdleConnsPerHost
 		keepAliveInterval := backends.KeepAliveInterval
 
-		if backend.Timeouts != nil {
-			timeouts = *backend.Timeouts
+		if backend.Timeouts == nil {
+			backend.Timeouts = &timeouts
 		}
-		if backend.ConcurrencyLimit != nil {
-			concurencyLimit = *backend.ConcurrencyLimit
+		if backend.ConcurrencyLimit == nil {
+			backend.ConcurrencyLimit = &concurencyLimit
 		}
 		if backend.MaxTries == nil {
 			backend.MaxTries = &tries
@@ -112,9 +114,10 @@ func createBackendsV2(logger *zap.Logger, backends types.BackendsV2, pathCache p
 				metadata.Metadata.RUnlock()
 				logger.Error("unknown backend protocol",
 					zap.Any("backend", backend),
+					zap.String("requested_protocol", backend.Protocol),
 					zap.Strings("supported_backends", protocols),
 				)
-				return nil, errors.New("unknown backend protocol")
+				return nil, fmt.Errorf("unknown backend protocol '%v'", backend.Protocol)
 			}
 			client, err = backendInit(backend)
 			if err != nil {
@@ -134,14 +137,18 @@ func createBackendsV2(logger *zap.Logger, backends types.BackendsV2, pathCache p
 				metadata.Metadata.RUnlock()
 				logger.Error("unknown backend protocol",
 					zap.Any("backend", backend),
+					zap.String("requested_protocol", backend.Protocol),
 					zap.Strings("supported_protocols", protocols),
 				)
-				return nil, errors.New("unknown backend protocol")
+				return nil, fmt.Errorf("unknown backend protocol '%v'", backend.Protocol)
 			}
 			backends := make([]types.ServerClient, 0, len(backend.Servers))
 			for _, server := range backend.Servers {
 				config.Servers = []string{server}
 				client, err = backendInit(backend)
+				if err != nil {
+					return nil, err
+				}
 				backends = append(backends, client)
 			}
 
@@ -191,7 +198,7 @@ func NewZipper(sender func(*types.Stats), config *types.Config, logger *zap.Logg
 		config.CarbonSearchV2.BackendsV2 = types.BackendsV2{
 			Backends: []types.BackendV2{{
 				GroupName:           config.CarbonSearch.Backend,
-				Protocol:            "carbonapiv2",
+				Protocol:            "carbonapi_v2_pb",
 				LBMethod:            types.RoundRobinLB,
 				Servers:             []string{config.CarbonSearch.Backend},
 				Timeouts:            &config.Timeouts,
@@ -237,7 +244,7 @@ func NewZipper(sender func(*types.Stats), config *types.Config, logger *zap.Logg
 		for _, backend := range config.Backends {
 			backend := types.BackendV2{
 				GroupName:           config.CarbonSearch.Backend,
-				Protocol:            "carbonapiv2",
+				Protocol:            "carbonapi_v2_pb",
 				LBMethod:            types.RoundRobinLB,
 				Servers:             []string{backend},
 				Timeouts:            &config.Timeouts,
@@ -252,7 +259,13 @@ func NewZipper(sender func(*types.Stats), config *types.Config, logger *zap.Logg
 	}
 
 	storeClients, err = createBackendsV2(logger, config.BackendsV2, config.PathCache)
+	if err != nil {
+		return nil, err
+	}
 	storeBackends, err := broadcast.NewBroadcastGroup("root", storeClients, config.PathCache, config.ConcurrencyLimitPerServer, config.Timeouts)
+	if err != nil {
+		return nil, err
+	}
 
 	z := &Zipper{
 		probeTicker: time.NewTicker(10 * time.Minute),

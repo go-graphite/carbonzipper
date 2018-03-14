@@ -2,6 +2,7 @@ package broadcast
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/go-graphite/carbonzipper/limiter"
 	"github.com/go-graphite/carbonzipper/pathcache"
@@ -23,11 +24,14 @@ type BroadcastGroup struct {
 }
 
 func NewBroadcastGroup(groupName string, servers []types.ServerClient, pathCache pathcache.PathCache, concurencyLimit int, timeout types.Timeouts) (*BroadcastGroup, error) {
+	if len(servers) == 0 {
+		return nil, fmt.Errorf("no servers specified")
+	}
 	serverNames := make([]string, 0, len(servers))
 	for _, s := range servers {
 		serverNames = append(serverNames, s.Name())
 	}
-	logger := zapwriter.Logger("broadCastNewGroup")
+	logger := zapwriter.Logger("broadcast")
 	logger.Info("limiter will be created",
 		zap.String("name", groupName),
 		zap.Strings("servrers", serverNames),

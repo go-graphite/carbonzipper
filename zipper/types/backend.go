@@ -16,7 +16,7 @@ type BackendsV2 struct {
 
 type BackendV2 struct {
 	GroupName           string         `yaml:"groupName"`
-	Protocol            string         `yaml:"backendProtocol"`
+	Protocol            string         `yaml:"protocol"`
 	LBMethod            LBMethod       `yaml:"lbMethod"` // Valid: rr/roundrobin, broadcast/all
 	Servers             []string       `yaml:"servers"`
 	Timeouts            *Timeouts      `yaml:"timeouts"`

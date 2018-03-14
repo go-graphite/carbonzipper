@@ -3,12 +3,8 @@ package types
 import (
 	"context"
 
-	"github.com/go-graphite/carbonzipper/limiter"
 	protov3 "github.com/go-graphite/protocol/carbonapi_v3_pb"
 )
-
-type NewServerClient func(BackendV2) (ServerClient, error)
-type NewServerClientWithLimiter func(BackendV2, limiter.ServerLimiter) (ServerClient, error)
 
 type ServerClient interface {
 	Name() string

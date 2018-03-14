@@ -49,7 +49,7 @@ type ClientProtoV2Group struct {
 	maxTries int
 }
 
-func NewClientProtoV2GroupWithLimiter(config types.BackendV2, limiter limiter.ServerLimiter) (*ClientProtoV2Group, error) {
+func NewClientProtoV2GroupWithLimiter(config types.BackendV2, limiter limiter.ServerLimiter) (types.ServerClient, error) {
 	httpClient := &http.Client{
 		Transport: &http.Transport{
 			MaxIdleConnsPerHost: *config.MaxIdleConnsPerHost,
@@ -74,7 +74,13 @@ func NewClientProtoV2GroupWithLimiter(config types.BackendV2, limiter limiter.Se
 	return c, nil
 }
 
-func NewClientProtoV2Group(config types.BackendV2) (*ClientProtoV2Group, error) {
+func NewClientProtoV2Group(config types.BackendV2) (types.ServerClient, error) {
+	if config.ConcurrencyLimit == nil {
+		return nil, fmt.Errorf("concurency limit is not set")
+	}
+	if len(config.Servers) == 0 {
+		return nil, fmt.Errorf("no servers specified")
+	}
 	limiter := limiter.NewServerLimiter(config.Servers, *config.ConcurrencyLimit)
 
 	return NewClientProtoV2GroupWithLimiter(config, limiter)

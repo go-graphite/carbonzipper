@@ -2,6 +2,7 @@ package grpc
 
 import (
 	"context"
+	"fmt"
 	"math"
 
 	"github.com/go-graphite/carbonzipper/limiter"
@@ -43,12 +44,15 @@ type ClientGRPCGroup struct {
 	client protov3grpc.CarbonV1Client
 }
 
-func NewClientGRPCGroupWithLimiter(config types.BackendV2, limiter limiter.ServerLimiter) (*ClientGRPCGroup, error) {
+func NewClientGRPCGroupWithLimiter(config types.BackendV2, limiter limiter.ServerLimiter) (types.ServerClient, error) {
 	return NewClientGRPCGroup(config)
 }
 
-func NewClientGRPCGroup(config types.BackendV2) (*ClientGRPCGroup, error) {
+func NewClientGRPCGroup(config types.BackendV2) (types.ServerClient, error) {
 	// TODO: Implement normal resolver
+	if len(config.Servers) == 0 {
+		return nil, fmt.Errorf("no servers specified")
+	}
 	r, cleanup := manual.GenerateAndRegisterManualResolver()
 	var resolvedAddrs []resolver.Address
 	for _, addr := range config.Servers {
