@@ -54,16 +54,22 @@ type nameLeaf struct {
 	leaf bool
 }
 
-func sanitizeTimouts(timeouts types.Timeouts) types.Timeouts {
+var defaultTimeouts = types.Timeouts{
+	Render:  10000 * time.Second,
+	Find:    100 * time.Second,
+	Connect: 200 * time.Millisecond,
+}
+
+func sanitizeTimouts(timeouts, defaultTimeouts types.Timeouts) types.Timeouts {
 	if timeouts.Render == 0 {
-		timeouts.Render = 10000 * time.Second
+		timeouts.Render = defaultTimeouts.Render
 	}
 	if timeouts.Find == 0 {
-		timeouts.Find = 10000 * time.Second
+		timeouts.Find = defaultTimeouts.Find
 	}
 
 	if timeouts.Connect == 0 {
-		timeouts.Connect = 200 * time.Millisecond
+		timeouts.Connect = defaultTimeouts.Connect
 	}
 
 	return timeouts
@@ -80,6 +86,9 @@ func createBackendsV2(logger *zap.Logger, backends types.BackendsV2, pathCache p
 		keepAliveInterval := backends.KeepAliveInterval
 
 		if backend.Timeouts == nil {
+			backend.Timeouts = &timeouts
+		} else {
+			timeouts := sanitizeTimouts(*backend.Timeouts, backends.Timeouts)
 			backend.Timeouts = &timeouts
 		}
 		if backend.ConcurrencyLimit == nil {
@@ -162,35 +171,10 @@ func createBackendsV2(logger *zap.Logger, backends types.BackendsV2, pathCache p
 	return storeClients, nil
 }
 
-/*
-type BackendsV2 struct {
-	Backends                  []BackendV2   `yaml:"backends"`
-	MaxIdleConnsPerHost       int           `yaml:"maxIdleConnsPerHost"`
-	ConcurrencyLimitPerServer int           `yaml:"concurrencyLimit"`
-	Timeouts                  Timeouts      `yaml:"timeouts"`
-	KeepAliveInterval         time.Duration `yaml:"keepAliveInterval"`
-	MaxTries                  int           `yaml:"maxTries"`
-	MaxGlobs                  int           `yaml:"maxGlobs"`
-}
-
-type BackendV2 struct {
-	GroupName           string         `yaml:"groupName"`
-	Protocol            string         `yaml:"backendProtocol"`
-	LBMethod            LBMethod       `yaml:"lbMethod"` // Valid: rr/roundrobin, broadcast/all
-	Servers             []string       `yaml:"servers"`
-	Timeouts            *Timeouts      `yaml:"timeouts"`
-	ConcurrencyLimit    *int           `yaml:"concurrencyLimit"`
-	KeepAliveInterval   *time.Duration `yaml:"keepAliveInterval"`
-	MaxIdleConnsPerHost *int           `yaml:"maxIdleConnsPerHost"`
-	MaxTries            *int           `yaml:"maxTries"`
-	MaxGlobs            int            `yaml:"maxGlobs"`
-}
-*/
-
 // NewZipper allows to create new Zipper
 func NewZipper(sender func(*types.Stats), config *types.Config, logger *zap.Logger) (*Zipper, error) {
 	var err error
-	config.Timeouts = sanitizeTimouts(config.Timeouts)
+	config.Timeouts = sanitizeTimouts(config.Timeouts, defaultTimeouts)
 
 	var searchClients []types.ServerClient
 	// Convert old config format to new one
@@ -299,13 +283,14 @@ func NewZipper(sender func(*types.Stats), config *types.Config, logger *zap.Logg
 
 func (z *Zipper) doProbe(logger *zap.Logger) {
 	ctx, cancel := context.WithTimeout(context.Background(), z.timeout)
+	defer cancel()
+
 	_, err := z.storeBackends.ProbeTLDs(ctx)
 	if err != nil {
 		logger.Error("failed to probe tlds",
 			zap.Error(err),
 		)
 	}
-	cancel()
 }
 
 func (z *Zipper) probeTlds() {

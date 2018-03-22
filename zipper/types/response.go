@@ -1,9 +1,9 @@
 package types
 
 import (
-	protov3 "github.com/go-graphite/protocol/carbonapi_v3_pb"
 	"math"
 
+	protov3 "github.com/go-graphite/protocol/carbonapi_v3_pb"
 	"github.com/lomik/zapwriter"
 	"go.uber.org/zap"
 )
@@ -39,29 +39,42 @@ func mergeFindRequests(f1, f2 []protov3.GlobMatch) []protov3.GlobMatch {
 }
 */
 
-func (r *ServerFindResponse) Merge(response *ServerFindResponse) {
-	r.Stats.Merge(response.Stats)
-	if response.Err != nil {
-		return
+func (first *ServerFindResponse) Merge(second *ServerFindResponse) error {
+	first.Stats.Merge(second.Stats)
+	if second.Err != nil {
+		return second.Err
 	}
 
-	seen := make(map[string]struct{}, len(r.Response.Metrics))
-	for i := range r.Response.Metrics {
-		seen[r.Response.Metrics[i].Name] = struct{}{}
-	}
-
-	for i := range response.Response.Metrics {
-		if _, ok := seen[r.Response.Metrics[i].Name]; !ok {
-			r.Response.Metrics = append(r.Response.Metrics, response.Response.Metrics[i])
-			seen[r.Response.Metrics[i].Name] = struct{}{}
+	seenMetrics := make(map[string]int)
+	seenMatches := make(map[string]struct{})
+	for i, m := range first.Response.Metrics {
+		seenMetrics[m.Name] = i
+		for _, mm := range m.Matches {
+			seenMatches[m.Name+"."+mm.Path] = struct{}{}
 		}
 	}
 
-	if r.Err != nil && response.Err == nil {
-		r.Err = nil
+	var i int
+	var ok bool
+	for _, m := range second.Response.Metrics {
+		if i, ok = seenMetrics[m.Name]; !ok {
+			first.Response.Metrics = append(first.Response.Metrics, m)
+			continue
+		}
+		for _, mm := range m.Matches {
+			key := first.Response.Metrics[i].Name + "." + mm.Path
+			if _, ok := seenMatches[key]; !ok {
+				seenMatches[key] = struct{}{}
+				first.Response.Metrics[i].Matches = append(first.Response.Metrics[i].Matches, mm)
+			}
+		}
 	}
 
-	return
+	if first.Err != nil && second.Err == nil {
+		first.Err = nil
+	}
+
+	return nil
 }
 
 type ServerFetchResponse struct {
@@ -147,30 +160,32 @@ out:
 	return nil
 }
 
-func (r *ServerFetchResponse) Merge(response *ServerFetchResponse) {
-	r.Stats.Merge(response.Stats)
+func (first *ServerFetchResponse) Merge(second *ServerFetchResponse) {
+	first.Stats.Merge(second.Stats)
 
-	if response.Err != nil {
+	if second.Err != nil {
 		return
 	}
 
-	metrics := make(map[string]*protov3.FetchResponse)
-	for i := range response.Response.Metrics {
-		metrics[response.Response.Metrics[i].Name] = &response.Response.Metrics[i]
+	metrics := make(map[string]int)
+	for i := range first.Response.Metrics {
+		metrics[first.Response.Metrics[i].Name] = i
 	}
 
-	for i := range r.Response.Metrics {
-		if m, ok := metrics[r.Response.Metrics[i].Name]; ok {
-			err := mergeFetchResponses(&r.Response.Metrics[i], m)
+	for i := range second.Response.Metrics {
+		if j, ok := metrics[second.Response.Metrics[i].Name]; ok {
+			err := mergeFetchResponses(&first.Response.Metrics[i], &second.Response.Metrics[j])
 			if err != nil {
 				// TODO: Normal error handling
 				continue
 			}
+		} else {
+			first.Response.Metrics = append(first.Response.Metrics, second.Response.Metrics[i])
 		}
 	}
 
-	if r.Err != nil && response.Err == nil {
-		r.Err = nil
+	if first.Err != nil && second.Err == nil {
+		first.Err = nil
 	}
 
 	return

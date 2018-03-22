@@ -65,9 +65,9 @@ func NewClientGRPCGroup(config types.BackendV2) (types.ServerClient, error) {
 		grpc.WithUserAgent("carbonzipper"),
 		grpc.WithCompressor(grpc.NewGZIPCompressor()),
 		grpc.WithDecompressor(grpc.NewGZIPDecompressor()),
-		grpc.WithBalancerName("roundrobin"), // TODO: Make that configurable
-		grpc.WithMaxMsgSize(math.MaxUint32), // TODO: make that configurable
-		grpc.WithInsecure(),                 // TODO: Make configurable
+		grpc.WithBalancerName("round_robin"), // TODO: Make that configurable
+		grpc.WithMaxMsgSize(math.MaxUint32),  // TODO: make that configurable
+		grpc.WithInsecure(),                  // TODO: Make configurable
 	}
 
 	conn, err := grpc.Dial(r.Scheme()+":///server", opts...)

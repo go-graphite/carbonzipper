@@ -63,6 +63,8 @@ func (c BroadcastGroup) Backends() []string {
 }
 
 func (bg *BroadcastGroup) Fetch(ctx context.Context, request *protov3.MultiFetchRequest) (*protov3.MultiFetchResponse, *types.Stats, error) {
+	logger := zapwriter.Logger("broadcastGroup").With(zap.String("groupName", bg.groupName))
+
 	resCh := make(chan *types.ServerFetchResponse, len(bg.clients))
 	ctx, cancel := context.WithTimeout(ctx, bg.timeout.Render)
 	defer cancel()
@@ -81,26 +83,36 @@ func (bg *BroadcastGroup) Fetch(ctx context.Context, request *protov3.MultiFetch
 
 	var result types.ServerFetchResponse
 	var err error
+	responseCounts := 0
+GATHER:
 	for {
 		select {
 		case r := <-resCh:
+			responseCounts++
 			if r.Err != nil {
 				err = types.ErrNonFatalErrors
-				continue
-			}
-
-			if r.Response != nil {
+			} else {
 				if result.Response == nil {
 					result = *r
 				} else {
 					result.Merge(r)
 				}
 			}
+
+			if responseCounts == len(bg.clients) {
+				break GATHER
+			}
 		case <-ctx.Done():
 			err = types.ErrTimeoutExceeded
-			break
+			break GATHER
 		}
 	}
+
+	logger.Debug("got some responses",
+		zap.Int("clients_count", len(bg.clients)),
+		zap.Int("response_count", responseCounts),
+		zap.Bool("have_errors", err != nil),
+	)
 
 	return result.Response, result.Stats, err
 }
@@ -125,9 +137,8 @@ func (bg *BroadcastGroup) Find(ctx context.Context, request *protov3.MultiGlobRe
 			logger.Debug("got a slot")
 			var r types.ServerFindResponse
 			r.Response, r.Stats, r.Err = client.Find(ctx, request)
-			resCh <- &r
 			bg.limiter.Leave(ctx, bg.groupName)
-			logger.Debug("got result")
+			resCh <- &r
 		}(client)
 	}
 
@@ -140,12 +151,10 @@ GATHER:
 		case r := <-resCh:
 			responseCounts++
 			if r.Err == nil {
-				if r.Response != nil {
-					if result.Response == nil {
-						result = *r
-					} else {
-						result.Merge(r)
-					}
+				if result.Response == nil {
+					result = *r
+				} else {
+					result.Merge(r)
 				}
 			} else {
 				err = types.ErrNonFatalErrors
@@ -155,10 +164,16 @@ GATHER:
 				break GATHER
 			}
 		case <-ctx.Done():
+			logger.Warn("timeout waiting for more responses")
 			err = types.ErrTimeoutExceeded
-			break
+			break GATHER
 		}
 	}
+	logger.Debug("got some responses",
+		zap.Int("clients_count", len(bg.clients)),
+		zap.Int("response_count", responseCounts),
+		zap.Bool("have_errors", err != nil),
+	)
 
 	return result.Response, result.Stats, err
 }
@@ -177,61 +192,72 @@ func (bg *BroadcastGroup) Stats(ctx context.Context) (*protov3.MetricDetailsResp
 type tldResponse struct {
 	server string
 	tlds   []string
+	err    error
+}
+
+func doProbe(ctx context.Context, client types.ServerClient, resCh chan<- tldResponse) {
+	name := client.Name()
+
+	res, err := client.ProbeTLDs(ctx)
+	if err != nil {
+		resCh <- tldResponse{
+			server: name,
+			err:    err,
+		}
+		return
+	}
+
+	resCh <- tldResponse{
+		server: name,
+		tlds:   res,
+	}
 }
 
 func (bg *BroadcastGroup) ProbeTLDs(ctx context.Context) ([]string, error) {
 	logger := zapwriter.Logger("probe").With(zap.String("groupName", bg.groupName))
 	var tlds []string
 	cache := make(map[string][]string)
-	resCh := make(chan *tldResponse, len(bg.clients))
+	resCh := make(chan tldResponse, len(bg.clients))
 	ctx, cancel := context.WithTimeout(ctx, bg.timeout.Find)
+	defer cancel()
 
 	for _, client := range bg.clients {
-		go func(client types.ServerClient) {
-			logger.Debug("probeTLD",
-				zap.String("name", client.Name()),
-			)
+		go doProbe(ctx, client, resCh)
+	}
 
-			res, err := client.ProbeTLDs(ctx)
-			if err != nil {
+	responses := 0
+GATHER:
+	for {
+		select {
+		case r := <-resCh:
+			responses++
+			if r.err != nil {
 				logger.Error("failed to probe tld",
-					zap.String("name", client.Name()),
-					zap.Error(err),
+					zap.String("name", r.server),
+					zap.Error(r.err),
 				)
-				return
+				continue
+			}
+			tlds = append(tlds, r.tlds...)
+			for _, tld := range r.tlds {
+				cache[tld] = append(cache[tld], r.server)
 			}
 
-			resCh <- &tldResponse{
-				server: client.Name(),
-				tlds:   res,
+			if responses == len(bg.clients) {
+				break GATHER
 			}
-		}(client)
-	}
-
-	counter := 0
-	select {
-	case r := <-resCh:
-		counter++
-		tlds = append(tlds, r.tlds...)
-		for _, tld := range r.tlds {
-			cache[tld] = append(cache[tld], r.server)
+		case <-ctx.Done():
+			break GATHER
 		}
-
-		if counter == len(bg.clients) {
-			cancel()
-			break
-		}
-	case <-ctx.Done():
-		cancel()
-		break
 	}
+	cancel()
+
+	logger.Debug("TLD Probe",
+		zap.Any("cache", cache),
+	)
 
 	for k, v := range cache {
 		bg.pathCache.Set(k, v)
-		logger.Debug("TLD Probe",
-			zap.String("path", k),
-			zap.Strings("servers", v),
-		)
 	}
 
 	return tlds, nil
