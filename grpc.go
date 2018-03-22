@@ -61,7 +61,7 @@ func (srv GRPCServer) FetchMetrics(ctx context.Context, in *pb.MultiFetchRequest
 
 	Metrics.RenderRequests.Add(1)
 
-	response, stats, err := config.zipper.FetchGRPC(ctx, in)
+	response, stats, err := config.zipper.FetchProtoV3(ctx, in)
 	sendStats(stats)
 	if err != nil {
 		grpcLogger.Error("failed to fetch data",
@@ -104,7 +104,7 @@ func (srv GRPCServer) FindMetrics(ctx context.Context, in *pb.MultiGlobRequest) 
 	ctx, cancel := context.WithTimeout(ctx, config.Timeouts.Find)
 	defer cancel()
 
-	response, stats, err := config.zipper.FindGRPC(ctx, in)
+	response, stats, err := config.zipper.FindProtoV3(ctx, in)
 	sendStats(stats)
 	if err != nil {
 		grpcLogger.Error("find error",

@@ -1,4 +1,4 @@
-package v2
+package v3
 
 import (
 	"context"
@@ -20,18 +20,18 @@ import (
 )
 
 func init() {
-	aliases := []string{"carbonapi_v2_pb", "proto_v2_pb", "v2_pb", "pb", "pb3", "protobuf", "protobuf3"}
+	aliases := []string{"carbonapi_v3_pb", "proto_v3_pb", "v3_pb"}
 	metadata.Metadata.Lock()
 	for _, name := range aliases {
 		metadata.Metadata.SupportedProtocols[name] = struct{}{}
-		metadata.Metadata.ProtocolInits[name] = NewClientProtoV2Group
-		metadata.Metadata.ProtocolInitsWithLimiter[name] = NewClientProtoV2GroupWithLimiter
+		metadata.Metadata.ProtocolInits[name] = New
+		metadata.Metadata.ProtocolInitsWithLimiter[name] = NewWithLimiter
 	}
 	defer metadata.Metadata.Unlock()
 }
 
 // RoundRobin is used to connect to backends inside clientGroups, implements ServerClient interface
-type ClientProtoV2Group struct {
+type ClientProtoV3Group struct {
 	groupName string
 	servers   []string
 
@@ -48,7 +48,7 @@ type ClientProtoV2Group struct {
 	httpQuery *helper.HttpQuery
 }
 
-func NewClientProtoV2GroupWithLimiter(config types.BackendV2, limiter limiter.ServerLimiter) (types.ServerClient, error) {
+func NewWithLimiter(config types.BackendV2, limiter limiter.ServerLimiter) (types.ServerClient, error) {
 	httpClient := &http.Client{
 		Transport: &http.Transport{
 			MaxIdleConnsPerHost: *config.MaxIdleConnsPerHost,
@@ -64,7 +64,7 @@ func NewClientProtoV2GroupWithLimiter(config types.BackendV2, limiter limiter.Se
 
 	httpQuery := helper.NewHttpQuery(logger, config.GroupName, config.Servers, *config.MaxTries, limiter, httpClient)
 
-	c := &ClientProtoV2Group{
+	c := &ClientProtoV3Group{
 		groupName: config.GroupName,
 		servers:   config.Servers,
 		timeout:   *config.Timeouts,
@@ -79,7 +79,7 @@ func NewClientProtoV2GroupWithLimiter(config types.BackendV2, limiter limiter.Se
 	return c, nil
 }
 
-func NewClientProtoV2Group(config types.BackendV2) (types.ServerClient, error) {
+func New(config types.BackendV2) (types.ServerClient, error) {
 	if config.ConcurrencyLimit == nil {
 		return nil, fmt.Errorf("concurency limit is not set")
 	}
@@ -88,18 +88,18 @@ func NewClientProtoV2Group(config types.BackendV2) (types.ServerClient, error) {
 	}
 	limiter := limiter.NewServerLimiter(config.Servers, *config.ConcurrencyLimit)
 
-	return NewClientProtoV2GroupWithLimiter(config, limiter)
+	return NewWithLimiter(config, limiter)
 }
 
-func (c ClientProtoV2Group) Name() string {
+func (c ClientProtoV3Group) Name() string {
 	return c.groupName
 }
 
-func (c ClientProtoV2Group) Backends() []string {
+func (c ClientProtoV3Group) Backends() []string {
 	return c.servers
 }
 
-func (c *ClientProtoV2Group) Fetch(ctx context.Context, request *protov3.MultiFetchRequest) (*protov3.MultiFetchResponse, *types.Stats, error) {
+func (c *ClientProtoV3Group) Fetch(ctx context.Context, request *protov3.MultiFetchRequest) (*protov3.MultiFetchResponse, *types.Stats, error) {
 	stats := &types.Stats{}
 	rewrite, _ := url.Parse("http://127.0.0.1/render/")
 
@@ -143,8 +143,7 @@ func (c *ClientProtoV2Group) Fetch(ctx context.Context, request *protov3.MultiFe
 	return &r, stats, nil
 }
 
-func (c *ClientProtoV2Group) Find(ctx context.Context, request *protov3.MultiGlobRequest) (*protov3.MultiGlobResponse, *types.Stats, error) {
-	logger := c.logger.With(zap.String("type", "find"))
+func (c *ClientProtoV3Group) Find(ctx context.Context, request *protov3.MultiGlobRequest) (*protov3.MultiGlobResponse, *types.Stats, error) {
 	stats := &types.Stats{}
 	rewrite, _ := url.Parse("http://127.0.0.1/metrics/find/")
 
@@ -187,7 +186,7 @@ func (c *ClientProtoV2Group) Find(ctx context.Context, request *protov3.MultiGlo
 		for _, e := range errors {
 			strErrors = append(strErrors, e.Error())
 		}
-		logger.Error("errors occurred while getting results",
+		c.logger.Error("errors occurred while getting results",
 			zap.Strings("errors", strErrors),
 		)
 	}
@@ -198,90 +197,18 @@ func (c *ClientProtoV2Group) Find(ctx context.Context, request *protov3.MultiGlo
 	return &r, stats, nil
 }
 
-func (c *ClientProtoV2Group) Info(ctx context.Context, request *protov3.MultiMetricsInfoRequest) (*protov3.ZipperInfoResponse, *types.Stats, error) {
-	logger := c.logger.With(zap.String("type", "info"))
-	stats := &types.Stats{}
-	rewrite, _ := url.Parse("http://127.0.0.1/info/")
-
-	var r protov3.ZipperInfoResponse
-	var errors []error
-	r.Info = make(map[string]protov3.MultiMetricsInfoResponse)
-	data := protov3.MultiMetricsInfoResponse{}
-	server := c.groupName
-	if len(c.servers) == 1 {
-		server = c.servers[0]
-	}
-	for _, query := range request.Names {
-		v := url.Values{
-			"target": []string{query},
-			"format": []string{"protobuf"},
-		}
-		rewrite.RawQuery = v.Encode()
-		res, err := c.httpQuery.DoQuery(ctx, rewrite.RequestURI())
-		if err != nil {
-			errors = append(errors, err)
-			continue
-		}
-
-		var info protov2.InfoResponse
-		err = info.Unmarshal(res.Response)
-		if err != nil {
-			errors = append(errors, err)
-			continue
-		}
-		stats.Servers = append(stats.Servers, res.Server)
-
-		if info.AggregationMethod == "" {
-			info.AggregationMethod = "average"
-		}
-		infoV3 := protov3.MetricsInfoResponse{
-			Name:              info.Name,
-			ConsolidationFunc: info.AggregationMethod,
-			XFilesFactor:      info.XFilesFactor,
-			MaxRetention:      uint32(info.MaxRetention),
-		}
-
-		for _, r := range info.Retentions {
-			newR := protov3.Retention{
-				SecondsPerPoint: uint32(r.SecondsPerPoint),
-				NumberOfPoints:  uint32(r.NumberOfPoints),
-			}
-			infoV3.Retentions = append(infoV3.Retentions, newR)
-		}
-
-		data.Metrics = append(data.Metrics, infoV3)
-	}
-	r.Info[server] = data
-
-	if len(errors) != 0 {
-		strErrors := make([]string, 0, len(errors))
-		for _, e := range errors {
-			strErrors = append(strErrors, e.Error())
-		}
-		logger.Error("errors occurred while getting results",
-			zap.Strings("errors", strErrors),
-		)
-	}
-
-	if len(r.Info[server].Metrics) == 0 {
-		return nil, stats, types.ErrNoResponseFetched
-	}
-
-	logger.Debug("got client response",
-		zap.Any("r", r),
-	)
-
-	return &r, stats, nil
-}
-
-func (c *ClientProtoV2Group) List(ctx context.Context) (*protov3.ListMetricsResponse, *types.Stats, error) {
-	return nil, nil, types.ErrNotImplementedYet
-}
-func (c *ClientProtoV2Group) Stats(ctx context.Context) (*protov3.MetricDetailsResponse, *types.Stats, error) {
+func (c *ClientProtoV3Group) Info(ctx context.Context, request *protov3.MultiMetricsInfoRequest) (*protov3.ZipperInfoResponse, *types.Stats, error) {
 	return nil, nil, types.ErrNotImplementedYet
 }
 
-func (c *ClientProtoV2Group) ProbeTLDs(ctx context.Context) ([]string, error) {
+func (c *ClientProtoV3Group) List(ctx context.Context) (*protov3.ListMetricsResponse, *types.Stats, error) {
+	return nil, nil, types.ErrNotImplementedYet
+}
+func (c *ClientProtoV3Group) Stats(ctx context.Context) (*protov3.MetricDetailsResponse, *types.Stats, error) {
+	return nil, nil, types.ErrNotImplementedYet
+}
+
+func (c *ClientProtoV3Group) ProbeTLDs(ctx context.Context) ([]string, error) {
 	logger := c.logger.With(zap.String("function", "prober"))
 	req := &protov3.MultiGlobRequest{
 		Metrics: []string{"*"},

@@ -27,6 +27,7 @@ import (
 	"github.com/go-graphite/carbonzipper/zipper"
 	"github.com/go-graphite/carbonzipper/zipper/types"
 	protov2 "github.com/go-graphite/protocol/carbonapi_v2_pb"
+	protov3 "github.com/go-graphite/protocol/carbonapi_v3_pb"
 	"gopkg.in/yaml.v2"
 
 	"github.com/lomik/zapwriter"
@@ -154,9 +155,10 @@ var BuildVersion = "(development version)"
 var searchConfigured = false
 
 const (
-	contentTypeJSON     = "application/json"
-	contentTypeProtobuf = "application/x-protobuf"
-	contentTypePickle   = "application/pickle"
+	contentTypeJSON        = "application/json"
+	contentTypeProtobuf    = "application/x-protobuf"
+	contentTypePickle      = "application/pickle"
+	contentTypeCarbonAPIv3 = "application/x-carbon-api-v3-pb"
 )
 
 func findHandler(w http.ResponseWriter, req *http.Request) {
@@ -186,7 +188,7 @@ func findHandler(w http.ResponseWriter, req *http.Request) {
 		zap.String("carbonapi_uuid", cu.GetUUID(ctx)),
 	)
 
-	metrics, stats, err := config.zipper.FindPB(ctx, []string{originalQuery})
+	metrics, stats, err := config.zipper.FindProtoV2(ctx, []string{originalQuery})
 	sendStats(stats)
 	if err != nil {
 		accessLogger.Error("find failed",
@@ -344,7 +346,7 @@ func renderHandler(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	metrics, stats, err := config.zipper.FetchPB(ctx, targets, int32(from), int32(until))
+	metrics, stats, err := config.zipper.FetchProtoV2(ctx, targets, int32(from), int32(until))
 	sendStats(stats)
 	if err != nil {
 		http.Error(w, "error fetching the data", http.StatusInternalServerError)
@@ -475,30 +477,58 @@ func infoHandler(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	result, stats, err := config.zipper.InfoPB(ctx, targets)
-	sendStats(stats)
-	if err != nil {
-		accessLogger.Error("info failed",
-			zap.Int("http_code", http.StatusInternalServerError),
-			zap.String("reason", err.Error()),
-			zap.Duration("runtime_seconds", time.Since(t0)),
-		)
-		http.Error(w, "info: error processing request", http.StatusInternalServerError)
-		return
-	}
-
+	haveNonFatalErrors := false
 	var b []byte
-	switch format {
-	case "protobuf", "protobuf3":
+	if format == "v2" || format == "carbonapi_v2_pb" || format == "protobuf" || format == "protobuf3" {
+		result, stats, err := config.zipper.InfoProtoV2(ctx, targets)
+		sendStats(stats)
+		if err != nil && err != types.ErrNonFatalErrors {
+			accessLogger.Error("info failed",
+				zap.Int("http_code", http.StatusInternalServerError),
+				zap.String("reason", err.Error()),
+				zap.Duration("runtime_seconds", time.Since(t0)),
+			)
+			http.Error(w, "info: error processing request", http.StatusInternalServerError)
+			return
+		}
+		//                                err := sender.SendCluster(fg.Cluster, fg.Server)
+		if err == types.ErrNonFatalErrors {
+			haveNonFatalErrors = true
+		}
+
 		w.Header().Set("Content-Type", contentTypeProtobuf)
 		b, err = result.Marshal()
-		/* #nosec */
 		_, _ = w.Write(b)
-	case "", "json":
-		w.Header().Set("Content-Type", contentTypeJSON)
-		jEnc := json.NewEncoder(w)
-		err = jEnc.Encode(result)
+	} else {
+		result, stats, err := config.zipper.InfoProtoV3(ctx, &protov3.MultiGlobRequest{Metrics: targets})
+		sendStats(stats)
+		if err != nil && err != types.ErrNonFatalErrors {
+			accessLogger.Error("info failed",
+				zap.Int("http_code", http.StatusInternalServerError),
+				zap.String("reason", err.Error()),
+				zap.Duration("runtime_seconds", time.Since(t0)),
+			)
+			http.Error(w, "info: error processing request", http.StatusInternalServerError)
+			return
+		}
+
+		if err == types.ErrNonFatalErrors {
+			haveNonFatalErrors = true
+		}
+
+		switch format {
+		case "v3", "carbonapi_v3_pb":
+			w.Header().Set("Content-Type", contentTypeCarbonAPIv3)
+			b, err = result.Marshal()
+			/* #nosec */
+			_, _ = w.Write(b)
+		case "", "json":
+			w.Header().Set("Content-Type", contentTypeJSON)
+			jEnc := json.NewEncoder(w)
+			err = jEnc.Encode(result)
+		}
 	}
+
 	if err != nil {
 		http.Error(w, "error marshaling data", http.StatusInternalServerError)
 		accessLogger.Error("info failed",
@@ -510,6 +540,7 @@ func infoHandler(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	accessLogger.Info("request served",
+		zap.Bool("have_non_fatal_errors", haveNonFatalErrors),
 		zap.Int("http_code", http.StatusOK),
 		zap.Duration("runtime_seconds", time.Since(t0)),
 	)

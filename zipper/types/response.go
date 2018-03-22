@@ -13,6 +13,12 @@ type ServerResponse struct {
 	Response []byte
 }
 
+type ServerInfoResponse struct {
+	Response *protov3.ZipperInfoResponse
+	Stats    *Stats
+	Err      error
+}
+
 type ServerFindResponse struct {
 	Response *protov3.MultiGlobResponse
 	Stats    *Stats

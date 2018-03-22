@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	_ "net/http/pprof"
+	"strings"
 	"time"
 
 	"github.com/go-graphite/carbonzipper/limiter"
@@ -309,27 +310,121 @@ func (z *Zipper) probeTlds() {
 }
 
 // GRPC-compatible methods
-func (z Zipper) FetchGRPC(ctx context.Context, request *protov3.MultiFetchRequest) (*protov3.MultiFetchResponse, *types.Stats, error) {
-	return z.storeBackends.Fetch(ctx, request)
+func (z Zipper) FetchProtoV3(ctx context.Context, request *protov3.MultiFetchRequest) (*protov3.MultiFetchResponse, *types.Stats, error) {
+	var statsSearch *types.Stats
+	if z.searchConfigured {
+		realRequest := &protov3.MultiFetchRequest{
+			Metrics: make([]protov3.FetchRequest, 0, len(request.Metrics)),
+		}
+
+		var errors []string
+		for _, metric := range request.Metrics {
+			if strings.HasPrefix(metric.Name, z.searchPrefix) {
+				r := &protov3.MultiGlobRequest{
+					Metrics: []string{metric.Name},
+				}
+				res, stat, err := z.searchBackends.Find(ctx, r)
+				statsSearch.Merge(stat)
+				if err != nil {
+					errors = append(errors, err.Error())
+					continue
+				}
+				if len(res.Metrics) == 0 {
+					continue
+				}
+				metricRequests := make([]protov3.FetchRequest, 0, len(res.Metrics))
+				for _, n := range res.Metrics {
+					for _, m := range n.Matches {
+						metricRequests = append(metricRequests, protov3.FetchRequest{
+							Name:            m.Path,
+							StartTime:       metric.StartTime,
+							StopTime:        metric.StopTime,
+							FilterFunctions: metric.FilterFunctions,
+						})
+					}
+				}
+				if len(metricRequests) > 0 {
+					realRequest.Metrics = append(realRequest.Metrics, metricRequests...)
+				}
+			} else {
+				realRequest.Metrics = append(realRequest.Metrics, metric)
+			}
+		}
+		if len(realRequest.Metrics) > 0 {
+			request = realRequest
+		}
+	}
+
+	res, stats, err := z.storeBackends.Fetch(ctx, request)
+	if statsSearch != nil {
+		stats.Merge(statsSearch)
+	}
+	return res, stats, err
 }
 
-func (z Zipper) FindGRPC(ctx context.Context, request *protov3.MultiGlobRequest) (*protov3.MultiGlobResponse, *types.Stats, error) {
-	return z.storeBackends.Find(ctx, request)
+func (z Zipper) FindProtoV3(ctx context.Context, request *protov3.MultiGlobRequest) (*protov3.MultiGlobResponse, *types.Stats, error) {
+	searchRequests := &protov3.MultiGlobRequest{}
+	if z.searchConfigured {
+		realRequest := &protov3.MultiGlobRequest{Metrics: make([]string, 0, len(request.Metrics))}
+		for _, m := range request.Metrics {
+			if strings.HasPrefix(m, z.searchPrefix) {
+				searchRequests.Metrics = append(searchRequests.Metrics, m)
+			} else {
+				realRequest.Metrics = append(realRequest.Metrics, m)
+			}
+		}
+		if len(searchRequests.Metrics) > 0 {
+			request = realRequest
+		}
+	}
+
+	res, stats, err := z.storeBackends.Find(ctx, request)
+	findResponse := &types.ServerFindResponse{
+		Response: res,
+		Stats:    stats,
+		Err:      err,
+	}
+	if len(searchRequests.Metrics) > 0 {
+		resSearch, statsSearch, err := z.searchBackends.Find(ctx, request)
+		searchResponse := &types.ServerFindResponse{
+			Response: resSearch,
+			Stats:    statsSearch,
+			Err:      err,
+		}
+		findResponse.Merge(searchResponse)
+	}
+	return findResponse.Response, findResponse.Stats, findResponse.Err
 }
 
-func (z Zipper) InfoGRPC(ctx context.Context, request *protov3.MultiMetricsInfoRequest) (*protov3.ZipperInfoResponse, *types.Stats, error) {
-	return z.storeBackends.Info(ctx, request)
+func (z Zipper) InfoProtoV3(ctx context.Context, request *protov3.MultiGlobRequest) (*protov3.ZipperInfoResponse, *types.Stats, error) {
+	realRequest := &protov3.MultiMetricsInfoRequest{Names: make([]string, 0, len(request.Metrics))}
+	res, _, err := z.FindProtoV3(ctx, request)
+	if err == nil || err == types.ErrNonFatalErrors {
+		for _, m := range res.Metrics {
+			for _, match := range m.Matches {
+				if match.IsLeaf {
+					realRequest.Names = append(realRequest.Names, match.Path)
+				}
+			}
+		}
+	} else {
+		for _, m := range request.Metrics {
+			realRequest.Names = append(realRequest.Names, m)
+		}
+	}
+
+	return z.storeBackends.Info(ctx, realRequest)
 }
 
-func (z Zipper) ListGRPC(ctx context.Context) (*protov3.ListMetricsResponse, *types.Stats, error) {
+func (z Zipper) ListProtoV3(ctx context.Context) (*protov3.ListMetricsResponse, *types.Stats, error) {
 	return z.storeBackends.List(ctx)
 }
-func (z Zipper) StatsGRPC(ctx context.Context) (*protov3.MetricDetailsResponse, *types.Stats, error) {
+func (z Zipper) StatsProtoV3(ctx context.Context) (*protov3.MetricDetailsResponse, *types.Stats, error) {
 	return z.storeBackends.Stats(ctx)
 }
 
 // PB3-compatible methods
-func (z Zipper) FetchPB(ctx context.Context, query []string, startTime, stopTime int32) (*protov2.MultiFetchResponse, *types.Stats, error) {
+func (z Zipper) FetchProtoV2(ctx context.Context, query []string, startTime, stopTime int32) (*protov2.MultiFetchResponse, *types.Stats, error) {
 	request := &protov3.MultiFetchRequest{}
 	for _, q := range query {
 		request.Metrics = append(request.Metrics, protov3.FetchRequest{
@@ -339,7 +434,7 @@ func (z Zipper) FetchPB(ctx context.Context, query []string, startTime, stopTime
 		})
 	}
 
-	grpcRes, stats, err := z.FetchGRPC(ctx, request)
+	grpcRes, stats, err := z.FetchProtoV3(ctx, request)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -371,11 +466,11 @@ func (z Zipper) FetchPB(ctx context.Context, query []string, startTime, stopTime
 	return &res, stats, nil
 }
 
-func (z Zipper) FindPB(ctx context.Context, query []string) ([]*protov2.GlobResponse, *types.Stats, error) {
+func (z Zipper) FindProtoV2(ctx context.Context, query []string) ([]*protov2.GlobResponse, *types.Stats, error) {
 	request := &protov3.MultiGlobRequest{
 		Metrics: query,
 	}
-	grpcReses, stats, err := z.FindGRPC(ctx, request)
+	grpcReses, stats, err := z.FindProtoV3(ctx, request)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -400,11 +495,11 @@ func (z Zipper) FindPB(ctx context.Context, query []string) ([]*protov2.GlobResp
 	return reses, stats, nil
 }
 
-func (z Zipper) InfoPB(ctx context.Context, targets []string) (*protov2.ZipperInfoResponse, *types.Stats, error) {
-	request := &protov3.MultiMetricsInfoRequest{
-		Names: targets,
+func (z Zipper) InfoProtoV2(ctx context.Context, targets []string) (*protov2.ZipperInfoResponse, *types.Stats, error) {
+	request := &protov3.MultiGlobRequest{
+		Metrics: targets,
 	}
-	grpcRes, stats, err := z.InfoGRPC(ctx, request)
+	grpcRes, stats, err := z.InfoProtoV3(ctx, request)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -436,8 +531,8 @@ func (z Zipper) InfoPB(ctx context.Context, targets []string) (*protov2.ZipperIn
 
 	return res, stats, nil
 }
-func (z Zipper) ListPB(ctx context.Context) (*protov2.ListMetricsResponse, *types.Stats, error) {
-	grpcRes, stats, err := z.ListGRPC(ctx)
+func (z Zipper) ListProtoV2(ctx context.Context) (*protov2.ListMetricsResponse, *types.Stats, error) {
+	grpcRes, stats, err := z.ListProtoV3(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -447,8 +542,8 @@ func (z Zipper) ListPB(ctx context.Context) (*protov2.ListMetricsResponse, *type
 	}
 	return res, stats, nil
 }
-func (z Zipper) StatsPB(ctx context.Context) (*protov2.MetricDetailsResponse, *types.Stats, error) {
-	grpcRes, stats, err := z.StatsGRPC(ctx)
+func (z Zipper) StatsProtoV2(ctx context.Context) (*protov2.MetricDetailsResponse, *types.Stats, error) {
+	grpcRes, stats, err := z.StatsProtoV3(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
