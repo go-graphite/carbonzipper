@@ -1,9 +1,8 @@
 package errors
 
 import (
-	"fmt"
-
 	"errors"
+	"fmt"
 )
 
 type Errors struct {
@@ -25,6 +24,7 @@ func FromErr(err error) *Errors {
 	if err == nil {
 		return nil
 	}
+
 	return &Errors{
 		HaveFatalErrors: true,
 		Errors:          []error{err},
@@ -39,6 +39,10 @@ func Fatal(err string) *Errors {
 }
 
 func Fatalf(format string, args ...interface{}) *Errors {
+	if len(args) == 0 {
+		return Fatal(format)
+	}
+
 	return &Errors{
 		HaveFatalErrors: true,
 		Errors:          []error{fmt.Errorf(format, args)},
@@ -53,6 +57,10 @@ func Error(err string) *Errors {
 }
 
 func Errorf(format string, args ...interface{}) *Errors {
+	if len(args) == 0 {
+		return Error(format)
+	}
+
 	return &Errors{
 		HaveFatalErrors: false,
 		Errors:          []error{fmt.Errorf(format, args)},
@@ -77,6 +85,10 @@ func (e *Errors) Add(err error) *Errors {
 }
 
 func (e *Errors) Addf(format string, args ...interface{}) *Errors {
+	if len(args) == 0 {
+		return e.Add(fmt.Errorf(format))
+	}
+
 	e.Errors = append(e.Errors, fmt.Errorf(format, args))
 	return e
 }
