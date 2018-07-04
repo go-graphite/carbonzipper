@@ -384,7 +384,11 @@ func (z Zipper) FetchProtoV3(ctx context.Context, request *protov3.MultiFetchReq
 
 	res, stats, err := z.storeBackends.Fetch(ctx, request)
 	if statsSearch != nil {
-		stats.Merge(statsSearch)
+		if stats == nil {
+			stats = statsSearch
+		} else {
+			stats.Merge(statsSearch)
+		}
 	}
 
 	e.Merge(err)
