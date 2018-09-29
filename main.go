@@ -213,7 +213,7 @@ func encodeFindResponse(format, query string, w http.ResponseWriter, metrics []p
 	var err error
 	var b []byte
 	switch format {
-	case "protobuf", "protobuf3":
+	case "protobuf", "protobuf3", "protov2":
 		w.Header().Set("Content-Type", contentTypeProtobuf)
 		var result pb3.GlobResponse
 		result.Name = query
@@ -296,11 +296,10 @@ func renderHandler(w http.ResponseWriter, req *http.Request) {
 		)
 		return
 	}
-	target := req.FormValue("target")
+	targets := req.Form["target"]
 	format := req.FormValue("format")
 	accessLogger = accessLogger.With(
 		zap.String("format", format),
-		zap.String("target", target),
 	)
 
 	from, err := strconv.Atoi(req.FormValue("from"))
@@ -326,7 +325,7 @@ func renderHandler(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	if target == "" {
+	if len(targets) == 0 {
 		http.Error(w, "empty target", http.StatusBadRequest)
 		accessLogger.Error("request failed",
 			zap.Int("memory_usage_bytes", memoryUsage),
@@ -337,9 +336,30 @@ func renderHandler(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	metrics, stats, err := config.zipper.Render(ctx, logger, target, int32(from), int32(until))
+	metrics := &pb3.MultiFetchResponse{}
+	stats := &zipper.Stats{}
+	errs := make([]error, 0)
+	for _, target := range targets {
+		metric, stat, err := config.zipper.Render(ctx, logger, target, int32(from), int32(until))
+		stats.CacheHits += stat.CacheHits
+		stats.CacheMisses += stat.CacheMisses
+		stats.FindErrors += stat.FindErrors
+		stats.InfoErrors += stat.InfoErrors
+		stats.MemoryUsage += stat.MemoryUsage
+		stats.RenderErrors += stat.RenderErrors
+		stats.SearchCacheHits += stat.SearchCacheHits
+		stats.SearchCacheMisses += stat.SearchCacheMisses
+		stats.SearchRequests += stat.SearchRequests
+		stats.Timeouts += stat.Timeouts
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		metrics.Metrics = append(metrics.Metrics, metric.Metrics...)
+	}
+
 	sendStats(stats)
-	if err != nil {
+	if len(errs) == len(targets) {
 		http.Error(w, "error fetching the data", http.StatusInternalServerError)
 		accessLogger.Error("request failed",
 			zap.Int("memory_usage_bytes", memoryUsage),
@@ -350,9 +370,18 @@ func renderHandler(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	if len(errs) != 0 {
+		accessLogger.Warn("request have errors",
+			zap.Int("memory_usage_bytes", memoryUsage),
+			zap.Int("http_code", http.StatusInternalServerError),
+			zap.Duration("runtime_seconds", time.Since(t0)),
+			zap.Any("errors", errs),
+		)
+	}
+
 	var b []byte
 	switch format {
-	case "protobuf", "protobuf3":
+	case "protobuf", "protobuf3", "protov2":
 		w.Header().Set("Content-Type", contentTypeProtobuf)
 		b, err = metrics.Marshal()
 
@@ -482,7 +511,7 @@ func infoHandler(w http.ResponseWriter, req *http.Request) {
 
 	var b []byte
 	switch format {
-	case "protobuf", "protobuf3":
+	case "protobuf", "protobuf3", "protov2":
 		w.Header().Set("Content-Type", contentTypeProtobuf)
 		var result pb3.ZipperInfoResponse
 		result.Responses = make([]pb3.ServerInfoResponse, len(infos))
