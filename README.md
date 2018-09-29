@@ -1,6 +1,8 @@
 carbonzipper: carbonserver proxy for graphite-web
 =================================================
 
+**DEPRECATED** carbonzipper was fully merged with carbonapi and all new fixes, etc are now buildable from [carbonapi/cmd/carbonzipper](https://github.com/go-graphite/carbonapi/tree/master/cmd/carbonzipper). This repo is available for historical purposes, no future changes will be made to master branch. Minor bugfixes might still be commited to 0.x branch which represents carbonzipper state at version 0.74.
+
 [![Build Status](https://travis-ci.org/go-graphite/carbonzipper.svg?branch=master)](https://travis-ci.org/go-graphite/carbonzipper)
 
 We are using <a href="https://packagecloud.io/"><img alt="Private Maven, RPM, DEB, PyPi and RubyGem Repository | packagecloud" height="46" src="https://packagecloud.io/images/packagecloud-badge.png" width="158" /></a> to host our packages!
