@@ -3,133 +3,205 @@
 
 [[projects]]
   branch = "master"
+  digest = "1:f98385a9b77f6cacae716a59c04e6ac374d101466d4369c4e8cc706a39c4bb2e"
   name = "github.com/bradfitz/gomemcache"
   packages = ["memcache"]
-  revision = "1952afaa557dc08e8e0d89eafab110fb501c1a2b"
+  pruneopts = "UT"
+  revision = "bc664df9673713a0ccf26e3b55a673ec7301088b"
 
 [[projects]]
   branch = "master"
+  digest = "1:3da1298e1c4af95c650c25452ceb309c3998e4297d95f0bfb3ad4590b4a11d1f"
   name = "github.com/dgryski/go-expirecache"
   packages = ["."]
+  pruneopts = "UT"
   revision = "743ef98b2adb7d72da5dff5df7d7a82f1a66c63e"
 
 [[projects]]
   branch = "master"
+  digest = "1:39bdc983ff1bde0b04837b94bf42055ad1548b978a9d9b9580165b299c8a2094"
   name = "github.com/dgryski/httputil"
   packages = ["."]
+  pruneopts = "UT"
   revision = "189c2918cd08517364b3ede5417684ca7a7341fe"
 
 [[projects]]
   branch = "master"
+  digest = "1:c183111eaf02a9e6bb39c213bdfb5472b16f1955dd4c9dab82db83f114c64a63"
   name = "github.com/facebookgo/atomicfile"
   packages = ["."]
+  pruneopts = "UT"
   revision = "2de1f203e7d5e386a6833233882782932729f27e"
 
 [[projects]]
   branch = "master"
+  digest = "1:5fe3f6ede1c208a2efd3b78fe4df0306aa9624edd39476143d14f0326e5a8d29"
   name = "github.com/facebookgo/clock"
   packages = ["."]
+  pruneopts = "UT"
   revision = "600d898af40aa09a7a93ecb9265d87b0504b6f03"
 
 [[projects]]
   branch = "master"
+  digest = "1:1f21d86648746b776eae0dff77e4cafa2d9ccec0f0f1248c48306231ee800674"
   name = "github.com/facebookgo/grace"
-  packages = ["gracehttp","gracenet"]
-  revision = "4afe952a37a495ae4ac0c1d4ce5f66e91058d149"
+  packages = [
+    "gracehttp",
+    "gracenet",
+  ]
+  pruneopts = "UT"
+  revision = "75cf19382434e82df4dd84953f566b8ad23d6e9e"
 
 [[projects]]
   branch = "master"
+  digest = "1:17cb421603403a24edb0c7eeb382295dd31c72ab9ccf31cf7f0a37971f00aaa7"
   name = "github.com/facebookgo/httpdown"
   packages = ["."]
-  revision = "a3b1354551a26449fbe05f5d855937f6e7acbd71"
+  pruneopts = "UT"
+  revision = "5979d39b15c26299dc282711b0d65b113daccea6"
 
 [[projects]]
   branch = "master"
+  digest = "1:b0b75ab0829ae3769f1f221486da0c40c8dc0680fb93d072b5df5a39d56c996c"
   name = "github.com/facebookgo/pidfile"
   packages = ["."]
+  pruneopts = "UT"
   revision = "f242e2999868dcd267a2b86e49ce1f9cf9e15b16"
 
 [[projects]]
   branch = "master"
+  digest = "1:02c7a4e944d94d6b80f51517158d10633b10775f528a3b7bdfc658d6f92415bd"
   name = "github.com/facebookgo/stats"
   packages = ["."]
+  pruneopts = "UT"
   revision = "1b76add642e42c6ffba7211ad7b3939ce654526e"
 
 [[projects]]
+  digest = "1:bfc758d5a03d57d97226fac6934551c01bd76612adb119c177395b057a0a46db"
   name = "github.com/gogo/protobuf"
-  packages = ["gogoproto","proto","protoc-gen-gogo/descriptor"]
-  revision = "100ba4e885062801d56799d78530b73b178a78f3"
-  version = "v0.4"
+  packages = [
+    "gogoproto",
+    "proto",
+    "protoc-gen-gogo/descriptor",
+  ]
+  pruneopts = "UT"
+  revision = "636bf0302bc95575d69441b25a2603156ffdddf1"
+  version = "v1.1.1"
 
 [[projects]]
+  branch = "master"
+  digest = "1:f7d8e8432e355163397d2da1e17d0fb616d611db1360c43b1ac73e56f87038e2"
   name = "github.com/lestrrat/go-file-rotatelogs"
   packages = ["."]
-  revision = "9df8b44f21785240553882138c5df2e9cc1db910"
-  version = "v2.1.0"
+  pruneopts = "UT"
+  revision = "d3151e2a480fdcd05fb97102f5310a47d96274c4"
 
 [[projects]]
   branch = "master"
+  digest = "1:b9f2e1d7b042e6fdb2aa1e3762afdb99e0c584f66a1a346b03cf8b4be203c694"
   name = "github.com/lestrrat/go-strftime"
   packages = ["."]
-  revision = "04ef93e285313c8978cbc7cad26d2aa7a9927451"
+  pruneopts = "UT"
+  revision = "ba3bf9c1d0421aa146564a632931730344f1f9f1"
 
 [[projects]]
   branch = "master"
+  digest = "1:57c2cb438edb524e67623c1509d22f3963ee87c5efbc5f8cc1222baddf477a0c"
   name = "github.com/lomik/og-rek"
   packages = ["."]
+  pruneopts = "UT"
   revision = "628eefeb8d8065e3c4300d3556181a255d1ab4ff"
 
 [[projects]]
   branch = "master"
+  digest = "1:974aad6425df52e3b22caefecf039fc58fb8dd121cbac84789e34914fbd16d38"
   name = "github.com/lomik/zapwriter"
   packages = ["."]
-  revision = "d4499a33b5929c4a2e7e169165f594f35b39638c"
+  pruneopts = "UT"
+  revision = "2ec2b9a616807f3fe930c075c48fcf32d1f2d250"
 
 [[projects]]
   branch = "master"
+  digest = "1:588e2057e78e22a3faad762ed9bb69b4c16f09c0b9949f0e104e7e9f8731a3d4"
   name = "github.com/peterbourgon/g2g"
   packages = ["."]
+  pruneopts = "UT"
   revision = "0c2bab2b173d2cd9385ea6da5cec7b14b5019f11"
 
 [[projects]]
+  digest = "1:40e195917a951a8bf867cd05de2a46aaf1806c50cf92eebf4c16f78cd196f747"
   name = "github.com/pkg/errors"
   packages = ["."]
+  pruneopts = "UT"
   revision = "645ef00459ed84a119197bfb8d8205042c6df63d"
   version = "v0.8.0"
 
 [[projects]]
+  digest = "1:274f67cb6fed9588ea2521ecdac05a6d62a8c51c074c1fccc6a49a40ba80e925"
   name = "github.com/satori/go.uuid"
   packages = ["."]
-  revision = "879c5887cd475cd7864858769793b2ceb0d44feb"
-  version = "v1.1.0"
+  pruneopts = "UT"
+  revision = "f58768cc1a7a7e77a3bd49e98cdd21419399b6a3"
+  version = "v1.2.0"
 
 [[projects]]
+  digest = "1:777e729b475d3895c7229552aa10076f0d177daf37c0a72258006d046d329960"
   name = "go.uber.org/atomic"
   packages = ["."]
+  pruneopts = "UT"
   revision = "4e336646b2ef9fc6e47be8e21594178f98e5ebcf"
   version = "v1.2.0"
 
 [[projects]]
+  digest = "1:60bf2a5e347af463c42ed31a493d817f8a72f102543060ed992754e689805d1a"
   name = "go.uber.org/multierr"
   packages = ["."]
+  pruneopts = "UT"
   revision = "3c4937480c32f4c13a875a1829af76c98ca3d40a"
   version = "v1.1.0"
 
 [[projects]]
+  digest = "1:c52caf7bd44f92e54627a31b85baf06a68333a196b3d8d241480a774733dcf8b"
   name = "go.uber.org/zap"
-  packages = [".","buffer","internal/bufferpool","internal/color","internal/exit","zapcore"]
-  revision = "9d9d6135afe89b6fc4a05e9a8552526caba38048"
-  version = "v1.5.0"
+  packages = [
+    ".",
+    "buffer",
+    "internal/bufferpool",
+    "internal/color",
+    "internal/exit",
+    "zapcore",
+  ]
+  pruneopts = "UT"
+  revision = "ff33455a0e382e8a81d14dd7c922020b6b5e7982"
+  version = "v1.9.1"
 
 [[projects]]
-  branch = "v2"
+  digest = "1:342378ac4dcb378a5448dd723f0784ae519383532f5e70ade24132c4c8693202"
   name = "gopkg.in/yaml.v2"
   packages = ["."]
-  revision = "eb3733d160e74a9c7e442f435eb3bea458e1d19f"
+  pruneopts = "UT"
+  revision = "5420a8b6744d3b0345ab293f6fcba19c978f1183"
+  version = "v2.2.1"
 
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "3205edcd7eba91dfe002f50735e34a94f620b07f64bd185e39dea077c378cbc2"
+  input-imports = [
+    "github.com/bradfitz/gomemcache/memcache",
+    "github.com/dgryski/go-expirecache",
+    "github.com/dgryski/httputil",
+    "github.com/facebookgo/grace/gracehttp",
+    "github.com/facebookgo/pidfile",
+    "github.com/gogo/protobuf/gogoproto",
+    "github.com/gogo/protobuf/proto",
+    "github.com/lestrrat/go-file-rotatelogs",
+    "github.com/lestrrat/go-strftime",
+    "github.com/lomik/og-rek",
+    "github.com/lomik/zapwriter",
+    "github.com/peterbourgon/g2g",
+    "github.com/satori/go.uuid",
+    "go.uber.org/zap",
+    "gopkg.in/yaml.v2",
+  ]
   solver-name = "gps-cdcl"
   solver-version = 1
