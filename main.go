@@ -753,9 +753,10 @@ func main() {
 
 		graphite.Register(fmt.Sprintf("%s.timeouts", pattern), Metrics.Timeouts)
 
-		for i := 0; i <= config.Buckets; i++ {
+		for i := 0; i < config.Buckets; i++ {
 			graphite.Register(fmt.Sprintf("%s.requests_in_%dms_to_%dms", pattern, i*100, (i+1)*100), bucketEntry(i))
 		}
+		graphite.Register(fmt.Sprintf("%s.requests_in_%dms_to_infinity", pattern, config.Buckets*100), bucketEntry(config.Buckets))
 
 		/* TODO(civil): Find a way to return that data
 		graphite.Register(fmt.Sprintf("%s.cache_size", pattern), Metrics.CacheSize)
